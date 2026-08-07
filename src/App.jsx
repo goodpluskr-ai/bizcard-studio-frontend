@@ -1,6 +1,65 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Award, Camera, Check, ClipboardList, CreditCard, Crown, FileText, Gem, Gift, Globe, Home as HomeIcon, Landmark, Mail, MapPin, Package, PackageSearch, Phone, Printer, Search, Settings, Star, Truck, Upload, User, UserCircle2, Wand2, X, Zap } from "lucide-react";
 
+// ==================== data/categories ====================
+// printSides: 양면인쇄 옵션 제공 여부 / numbering: 넘버링 옵션 제공 여부 / onlyOptions: 이 코드만 사용 가능한 옵션 목록(제한이 없으면 생략)
+const CATEGORIES = [
+  { code: "cat01", name: "빠른명함", tagline: "당일 제작", icon: Zap, iconBg: "#EDEAFD", iconFg: "#6C4CF0", note: null, printSides: true, numbering: true },
+  { code: "cat02", name: "프리미엄명함", tagline: "고급 수입지", icon: Crown, iconBg: "#FDF0DC", iconFg: "#DB9E1E", note: null, printSides: true, numbering: true },
+  { code: "cat03", name: "스페셜명함", tagline: "유포 · 벨벳 · 펄", icon: Gem, iconBg: "#E5F7EC", iconFg: "#22B573", note: null, printSides: true, numbering: true },
+  { code: "cat04", name: "카드명함", tagline: "PVC · 투명", icon: CreditCard, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "귀도리 옵션만 가능", printSides: true, numbering: true, onlyOptions: ["OPT002"] },
+  { code: "cat05", name: "에폭시명함", tagline: "에폭시 코팅", icon: Star, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "넘버링·양면 불가", printSides: false, numbering: false },
+  { code: "cat06", name: "박명함", tagline: "금박 · 은박", icon: Award, iconBg: "#FCE8EE", iconFg: "#E63A6B", note: "넘버링·양면 불가", printSides: false, numbering: false },
+];
+
+// ==================== data/papers ====================
+const PAPERS = [
+  // 2026-08-02: "빠른스노우250g는 옵션을 받으면 안 된다"는 요청 반영 — 익일출고를
+  // 위해 인쇄방식(단면/양면)만 고를 수 있고, 귀도리·타공·오시·미싱·넘버링 같은
+  // 시간이 걸리는 옵션은 아예 못 고르게 막습니다(data/options.js의 availableOptions
+  // 참고). 옵션이 필요하면 pa002(스노우지250g, "빠른" 없음)로 안내합니다.
+  { code: "pa001", cat: "cat01", name: "빠른스노우250g", sheets: 500, base: 4620, general: 14000, special: 5590, desc: "당일제작가능", restrictedOptions: true },
+  { code: "pa002", cat: "cat01", name: "스노우지250g", sheets: 500, base: 4620, general: 14000, special: 5590, choice: "무광코팅,코팅없음", desc: "코팅없음은 넘버링가능(450매,기준가40,000원)" },
+  { code: "pa003", cat: "cat01", name: "스노우지300g", sheets: 200, base: 4620, general: 14000, special: 5590, choice: "무광코팅,유광코팅", desc: "고급스러운 광택 옵션 선택 가능", numbering: false },
+  { code: "pa004", cat: "cat02", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 박이나 에폭시가 잘 어울림" },
+  { code: "pa005", cat: "cat02", name: "반누보화이트204g", sheets: 200, base: 6050, general: 15000, special: 7321, desc: "부드럽고 따뜻한 질감의 고급지. 잉크가 은은하게 표현됨" },
+  { code: "pa006", cat: "cat02", name: "반누보스노우화이트227g", sheets: 200, base: 7050, general: 17000, special: 8531, desc: "반누보보다 더 밝고 깨끗한 느낌. 고급스럽고 차분함" },
+  { code: "pa007", cat: "cat02", name: "반누보화이트320g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "반누보 특유의 질감 + 두꺼운 프리미엄 느낌" },
+  { code: "pa008", cat: "cat02", name: "아르미울트라화이트230g", sheets: 300, base: 4620, general: 15000, special: 5590, desc: "무난한 기본형 고급지. 다양한 업종에 적합" },
+  { code: "pa009", cat: "cat02", name: "아르미울트라화이트310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "은은한 펄(광택) 효과가 있는 특수지. 고급스럽고 화려함" },
+  { code: "pa010", cat: "cat02", name: "엑스트라매트백색350g", sheets: 200, base: 8800, general: 19000, special: 10648, desc: "섬유 느낌이 살아있는 독특한 질감. 감성적인 분위기" },
+  { code: "pa011", cat: "cat02", name: "랑데뷰내추럴310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "가장 인기 있는 프리미엄 고급지. 부드럽고 따뜻한 감성" },
+  { code: "pa017", cat: "cat02", name: "아쿠아사틴256g", sheets: 200, base: 17600, general: 35200, special: 21296, desc: "미세한 패턴 질감이 있는 유럽풍 고급지" },
+  { code: "pa018", cat: "cat02", name: "인버코트350g", sheets: 200, base: 18700, general: 37400, special: 22627, desc: "반짝이는 펄 효과. 조명에서 고급스럽게 빛남" },
+  { code: "pa020", cat: "cat02", name: "베이직백색233g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "매우 부드러운 촉감. 감성 브랜드·카페 스타일에 적합" },
+  { code: "pa021", cat: "cat02", name: "스타드림쿼츠240g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "골드 펄 느낌이 나는 화려한 특수지" },
+  { code: "pa022", cat: "cat02", name: "린넨커버솔라화이트216g", sheets: 200, base: 6050, general: 17000, special: 7321, desc: "매우 두꺼운 최고급지. 고급 브랜드용 추천" },
+  { code: "pa024", cat: "cat02", name: "크리스탈펄화이트235g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "검정색 특수지. 금박/은박과 조합 시 매우 고급스러움" },
+  { code: "pa025", cat: "cat02", name: "매쉬멜로우화이트209g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "물에 강한 합성지. 찢어짐과 습기에 강함" },
+  { code: "pa026", cat: "cat02", name: "다이니티골드펄250g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "친환경 크라프트 느낌. 자연주의·수제 감성", numbering: false },
+  { code: "pa027", cat: "cat02", name: "에그쉘엑스트라화이트400g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "벨벳처럼 부드러운 촉감. 최고급 감성 명함" },
+  { code: "pa028", cat: "cat03", name: "매트블랙380g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "매우 두꺼운 합지 스타일. 존재감 강함", numbering: false },
+  { code: "pa029", cat: "cat03", name: "유포지FEB250", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "푸른빛 펄 효과의 화려한 특수지", numbering: false },
+  { code: "pa030", cat: "cat03", name: "뉴크라프트보드300g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "단단하고 깔끔한 초고급 백색지" },
+  { code: "pa031", cat: "cat03", name: "벨벳화이트359g", sheets: 200, base: 9900, general: 20000, special: 11979, desc: "은은한 골드톤 특수지. 고급스러운 분위기 강조", numbering: false },
+  { code: "pa032", cat: "cat03", name: "듀오화이트400g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "물에 젖지않는 고급스러움" },
+  { code: "pa033", cat: "cat03", name: "블루펄스타250g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "느껴지는 독특한 텍스추어" },
+  { code: "pa035", cat: "cat03", name: "키칼라아이스골드250g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "최상의 멋스러움" },
+  { code: "pa036", cat: "cat03", name: "아트지백색300g", sheets: 200, base: 8800, general: 20000, special: 10648, desc: "매끄럽고 인쇄 발색이 선명한 아트지", numbering: false },
+  { code: "pa037", cat: "cat04", name: "PET투명300", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa038", cat: "cat04", name: "Luxury카드명함화이트", sheets: 200, base: 12100, general: 24200, special: 14641, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa039", cat: "cat04", name: "Luxury카드명함실버", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa040", cat: "cat04", name: "Luxury카드명함골드", sheets: 200, base: 23100, general: 46200, special: 27951, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa041", cat: "cat05", name: "아르미울트라화이트230g", sheets: 300, base: 11000, general: 22000, special: 13310, desc: "무난한 기본형 고급지" },
+  { code: "pa043", cat: "cat05", name: "아쿠아사틴256g", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "미세한 패턴 질감의 유럽풍 고급지" },
+  { code: "pa045", cat: "cat05", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 에폭시가 잘 어울림" },
+  { code: "pa047", cat: "cat05", name: "반누보화이트204g", sheets: 200, base: 10450, general: 20900, special: 12645, desc: "부드럽고 따뜻한 질감의 고급지" },
+  { code: "pa051", cat: "cat06", name: "아르미울트라화이트230g", sheets: 300, base: 12650, general: 25300, special: 15307, choice: "금박유광,금박무광,은박유광,은박무광", desc: "무난한 기본형 고급지" },
+  { code: "pa052", cat: "cat06", name: "아르미울트라화이트310g", sheets: 200, base: 13000, general: 26000, special: 15730, choice: "금박유광,금박무광,은박유광,은박무광", desc: "은은한 펄 효과. 고급스럽고 화려함" },
+  { code: "pa055", cat: "cat06", name: "스노우지백색300g무광코팅", sheets: 200, base: 15620, general: 31240, special: 18900, choice: "금박유광,금박무광,은박유광,은박무광", desc: "백색위에 박이 잘 어울림" },
+  { code: "pa056", cat: "cat06", name: "반누보화이트204g", sheets: 200, base: 11550, general: 23100, special: 13976, choice: "금박유광,금박무광,은박유광,은박무광", desc: "부드럽고 따뜻한 질감의 고급지" },
+];
+
 // ==================== constants/texts ====================
 const TEXTS = {
   // 홈 화면
@@ -513,71 +572,6 @@ const TEXTS = {
   inquiryDemoAdminReply: "확인했습니다. 반영해서 다시 안내드릴게요. (관리자 미리보기 답변)",
 };
 
-// ==================== data/options ====================
-// choice 항목은 { label, value } 형태입니다. 화면에는 label을 보여주고,
-// 저장·비교(가격 계산 등)에는 value(코드)를 사용해서 나중에 라벨 문구가 바뀌어도 로직이 깨지지 않게 했습니다.
-const OPTIONS = [
-  { code: "OPT001", name: "인쇄 방식", fee: 0, feeLabel: "추가금 없음", required: true, choice: [
-    { label: "단면명함", value: "single" }, { label: "양면명함", value: "double" },
-  ] },
-  { code: "OPT002", name: "귀도리(4mm)", fee: 2420, feeLabel: "+2,420원", multi: true, choice: [
-    { label: "좌상", value: "topLeft" }, { label: "좌하", value: "bottomLeft" }, { label: "우상", value: "topRight" }, { label: "우하", value: "bottomRight" },
-  ] },
-  { code: "OPT003", name: "타공(3mm)", fee: 3267, feeLabel: "+3,267원", choice: [
-    { label: "좌상", value: "topLeft" }, { label: "좌중", value: "midLeft" }, { label: "좌하", value: "bottomLeft" },
-    { label: "우상", value: "topRight" }, { label: "우중", value: "midRight" }, { label: "우하", value: "bottomRight" },
-  ] },
-  { code: "OPT004", name: "오시(1줄중앙)", fee: 6050, feeLabel: "+6,050원", choice: [
-    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
-  ] },
-  { code: "OPT005", name: "미싱(1줄 위치설정)", fee: 6050, feeLabel: "+6,050원", choice: [
-    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
-  ] },
-  { code: "OPT006", name: "넘버링", fee: 45980, feeLabel: "+45,980원", choice: null },
-];
-
-function availableOptions(category, paper) {
-  if (!category) return [];
-  let opts = OPTIONS;
-  if (category.onlyOptions) opts = opts.filter((o) => category.onlyOptions.includes(o.code));
-  if (category.printSides === false) opts = opts.filter((o) => o.code !== "OPT001");
-  if (category.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
-  if (paper && paper.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
-  // 2026-08-02: "빠른스노우250g는 익일출고를 위해 옵션을 못 받게 해달라. 다만
-  // 단면/양면(OPT001)은 그대로 고를 수 있어야 한다"는 요청 반영 — 이 용지만 인쇄
-  // 방식 외의 나머지 옵션(귀도리·타공·오시·미싱·넘버링)을 전부 제외합니다.
-  if (paper && paper.restrictedOptions) opts = opts.filter((o) => o.code === "OPT001");
-  return opts;
-}
-
-// 오시(OPT004)·미싱(OPT005)은 세로/가로 방향에 따라 기준가가 달라짐: 기준가 × 1.1 × 1.1
-// 세로 짧게: 5,000원 기준가 → 6,050원 / 가로 길게: 7,000원 기준가 → 8,470원
-function optionFee(o, selOptions) {
-  if (o.code === "OPT004" || o.code === "OPT005") {
-    const value = selOptions?.[o.code]?.choice;
-    const base = value === "horizontal" ? 7000 : 5000;
-    return Math.round(base * 1.1 * 1.1);
-  }
-  return o.fee;
-}
-
-// 용지 선택 시 기본으로 세팅할 옵션값 (인쇄 방식은 필수이므로 단면명함을 기본값으로 지정)
-function defaultSelOptions(category, paper) {
-  const opts = availableOptions(category, paper);
-  const hasPrintSide = opts.some((o) => o.code === "OPT001");
-  return hasPrintSide ? { OPT001: { choice: "single" } } : {};
-}
-
-// 옵션 + 선택값을 사람이 읽을 수 있는 문구로 변환 (예: "인쇄 방식(양면명함)", "귀도리(4mm)(좌상/우상)")
-function describeSelectedOption(o, sel) {
-  if (!o) return null;
-  if (!o.choice) return o.name;
-  const raw = sel?.choice;
-  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-  const labels = values.map((v) => o.choice.find((c) => c.value === v)?.label).filter(Boolean);
-  return labels.length ? `${o.name}(${labels.join("/")})` : o.name;
-}
-
 // ==================== components/ui ====================
 const STEPS = ["카테고리", "용지", "옵션", "회원", "디자인", "배송", "결제", "완료"];
 
@@ -804,373 +798,519 @@ function UploadBox({ label, icon: Icon, done, fileName, onFile, accept, capture 
   );
 }
 
-// ==================== utils/format ====================
-const won = (n) => `${Math.round(n).toLocaleString("ko-KR")}원`;
-
-// ==================== screens/Shipping ====================
-function ConfirmDialog({ title, message, cancelLabel, confirmLabel, onCancel, onConfirm }) {
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(15,15,30,0.45)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20,
-    }}>
-      <div style={{
-        background: "var(--paper-white)", borderRadius: 16, padding: "22px 20px", maxWidth: 320, width: "100%",
-        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-      }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{title}</div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.6, marginBottom: 18, whiteSpace: "pre-line" }}>{message}</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={onCancel} style={{
-            flex: 1, padding: "11px 0", borderRadius: 10, border: "1.5px solid var(--line)",
-            background: "var(--paper-white)", color: "var(--ink)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-          }}>{cancelLabel}</button>
-          <button onClick={onConfirm} style={{
-            flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
-            background: "var(--stamp)", color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-          }}>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
+// ==================== screens/Inquiry ====================
+// 주문별 1:1 문의(수정요청) 스레드 저장.
+// 스타일 캐시와 달리 이건 개인 요청 내용이라 shared:false(본인만 보는 저장소)를 씁니다.
+// 실제 서비스에서는 고객·관리자가 서로 다른 사람이라 이렇게 하면 관리자가 못 보게 되므로,
+// 반드시 진짜 백엔드(고객 계정 ↔ 관리자 계정이 같은 스레드를 보는 구조)로 옮겨야 합니다.
+// 지금은 프로토타입이라 "관리자 답변"도 같은 사용자가 미리보기 버튼으로 흉내냅니다.
+async function loadInquiryThread(orderNo) {
+  try {
+    const res = await window.storage.get(`inquiry:${orderNo}`, false);
+    return res?.value ? JSON.parse(res.value) : [];
+  } catch {
+    return [];
+  }
 }
 
-function Shipping({ order, patch, go, back, freeShip }) {
-  const s = order.ship;
-  const setShip = (p) => patch({ ship: { ...s, ...p } });
-  const canNext = s.name && s.addr && s.phone;
-  const [confirmStep, setConfirmStep] = useState(0); // 0=없음, 1=1차 경고, 2=2차(AI 요금) 경고
+async function saveInquiryThread(orderNo, messages) {
+  try {
+    await window.storage.set(`inquiry:${orderNo}`, JSON.stringify(messages), false);
+  } catch {
+    // 저장 실패해도 화면에는 이미 반영돼 있으므로 조용히 무시
+  }
+}
+
+function Inquiry({ order, go, back }) {
+  const orderNo = order.orderNo || "BC24110032"; // 실제 주문이 없을 때(데모 조회)는 예시 주문번호 사용
+  const [messages, setMessages] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = React.useRef(null);
+
+  React.useEffect(() => {
+    let active = true;
+    loadInquiryThread(orderNo).then((msgs) => {
+      if (active) { setMessages(msgs); setLoaded(true); }
+    });
+    return () => { active = false; };
+  }, [orderNo]);
+
+  React.useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const appendMessage = async (sender, content) => {
+    const next = [...messages, { sender, text: content, at: Date.now() }];
+    setMessages(next);
+    await saveInquiryThread(orderNo, next);
+  };
+
+  const handleSend = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setText("");
+    await appendMessage("customer", trimmed);
+    setSending(false);
+  };
+
+  const handlePreviewAdminReply = async () => {
+    await appendMessage("admin", TEXTS.inquiryDemoAdminReply);
+  };
+
   return (
-    <div className="app-body">
-      <TopBar title={TEXTS.shippingTitle} onBack={() => setConfirmStep(1)} step={5} go={go} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <Field label={TEXTS.shippingNameLabel}><input style={inputStyle} value={s.name} onChange={(e) => setShip({ name: e.target.value })} placeholder={TEXTS.namePlaceholder} /></Field>
-        <Field label={TEXTS.shippingAddrLabel}><input style={inputStyle} value={s.addr} onChange={(e) => setShip({ addr: e.target.value })} placeholder={TEXTS.shippingAddrPlaceholder} /></Field>
-        <Field label={TEXTS.shippingPhoneLabel}><input style={inputStyle} value={s.phone} onChange={(e) => setShip({ phone: e.target.value })} placeholder={TEXTS.phonePlaceholder} /></Field>
-        <Card style={{ background: "var(--paper-deep)", border: "none" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <Truck size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
-            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
-              {TEXTS.shippingNote}
-              {order.memberType === "general" && (
-                <div style={{ marginTop: 6 }}><Stamp active={freeShip} tone={freeShip ? "gold" : "stamp"}>{freeShip ? TEXTS.shipFreeApplied : TEXTS.shipFeeApplied}</Stamp></div>
-              )}
-            </div>
-          </div>
-        </Card>
+    <div className="app-body" style={{ display: "flex", flexDirection: "column" }}>
+      <TopBar title={TEXTS.inquiryTitle} sub={`${TEXTS.inquiryOrderNoPrefix} ${orderNo}`} onBack={back} go={go} />
+
+      <div style={{ padding: "6px 18px 4px" }}>
+        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10 }}>{TEXTS.inquiryPrivacyNote}</div>
       </div>
-      <div style={{ padding: "8px 18px 18px" }}>
-        <PrimaryButton disabled={!canNext} onClick={() => go("payment")}>{TEXTS.nextPayment}</PrimaryButton>
-        {!canNext && (
-          <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
-            {TEXTS.missingFieldsHint}
-            {[!s.name && TEXTS.shippingNameLabel, !s.addr && TEXTS.shippingAddrLabel, !s.phone && TEXTS.shippingPhoneLabel].filter(Boolean).join(", ")}
-          </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {loaded && messages.length === 0 && (
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", padding: "24px 10px" }}>{TEXTS.inquiryEmpty}</div>
         )}
-      </div>
-
-      {confirmStep === 1 && (
-        <ConfirmDialog
-          title={TEXTS.backResetWarnTitle}
-          message={TEXTS.backResetWarnMessage}
-          cancelLabel={TEXTS.backResetCancel}
-          confirmLabel={TEXTS.backResetConfirm}
-          onCancel={() => setConfirmStep(0)}
-          onConfirm={() => setConfirmStep(2)}
-        />
-      )}
-      {confirmStep === 2 && (
-        <ConfirmDialog
-          title={TEXTS.backResetAiFeeWarnTitle}
-          message={TEXTS.backResetAiFeeWarnMessage}
-          cancelLabel={TEXTS.backResetCancel}
-          confirmLabel={TEXTS.backResetConfirm}
-          onCancel={() => setConfirmStep(0)}
-          onConfirm={() => { setConfirmStep(0); back(); }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ==================== screens/Product ====================
-function PaperSelect({ order, patch, go, back, category, catPapers, paper }) {
-  // 2026-08-02: "코팅 옵션을 직접 골라야 다음으로 못 넘어간다"는 불편 반영 —
-  // 용지에 선택지(choice)가 있으면 "무광코팅"을 기본값으로 미리 골라둡니다.
-  // 대부분 무광코팅을 쓰시니, 안 바꾸고 그냥 "다음"을 눌러도 되게 했습니다.
-  // 물론 아래에서 언제든 다른 코팅으로 바꿀 수 있습니다.
-  const defaultChoiceFor = (p) => {
-    if (!p.choice) return null;
-    const choices = p.choice.split(",").map((c) => c.trim());
-    return choices.includes("무광코팅") ? "무광코팅" : choices[0];
-  };
-  const selectPaper = (p) => {
-    const changed = order.paperCode !== p.code; // 실제로 용지가 바뀌었을 때만 옵션 초기화
-    patch({
-      paperCode: p.code,
-      selOptions: changed ? defaultSelOptions(category, p) : order.selOptions,
-      paperChoice: changed ? defaultChoiceFor(p) : order.paperChoice,
-    });
-    if (!p.choice) go("options");
-  };
-  const selectChoice = (p, c) => {
-    const changed = order.paperCode !== p.code || order.paperChoice !== c;
-    patch({
-      paperCode: p.code,
-      selOptions: changed ? defaultSelOptions(category, p) : order.selOptions,
-      paperChoice: c,
-    });
-    go("options");
-  };
-  const canNext = order.paperCode && (!paper?.choice || order.paperChoice);
-  return (
-    <div className="app-body">
-      <TopBar title={`${category?.name || ""} · ${TEXTS.paperScreenTitleSuffix}`} sub={category?.note} onBack={back} step={1} go={go} />
-      <div style={{ padding: "6px 18px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {catPapers.map((p) => {
-          const choices = p.choice ? p.choice.split(",").map((c) => c.trim()) : [];
-          const isSelected = order.paperCode === p.code;
+        {messages.map((m, i) => {
+          const isCustomer = m.sender === "customer";
           return (
-            <Card key={p.code} selected={isSelected} onClick={() => selectPaper(p)}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 3, lineHeight: 1.45 }}>{p.desc}</div>
-                </div>
-                <div style={{ textAlign: "right", minWidth: 84 }}>
-                  <div style={{ fontSize: 15, fontWeight: 900, color: "var(--stamp)" }}>{won(order.memberType === "special" ? p.special : p.general)}</div>
-                  <div style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{p.sheets}{TEXTS.sheetsBasisSuffix}</div>
-                </div>
+            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCustomer ? "flex-end" : "flex-start" }}>
+              <div style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 3, padding: "0 4px" }}>
+                {isCustomer ? TEXTS.inquiryCustomerLabel : TEXTS.inquiryAdminLabel}
               </div>
-              {choices.length > 0 && (
-                <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--ink)", marginBottom: 6 }}>{TEXTS.paperChoiceLabel}</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {choices.map((c) => {
-                      const chosen = isSelected && order.paperChoice === c;
-                      return (
-                        <button
-                          key={c}
-                          onClick={() => selectChoice(p, c)}
-                          style={{
-                            fontSize: 11.5, padding: "6px 10px", borderRadius: 999, cursor: "pointer",
-                            border: `1.4px solid ${chosen ? "var(--stamp)" : "var(--line)"}`,
-                            background: chosen ? "var(--stamp)" : "var(--paper-white)",
-                            color: chosen ? "#fff" : "var(--ink)",
-                            fontFamily: "inherit", fontWeight: 600,
-                          }}
-                        >
-                          {c}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </Card>
+              <div style={{
+                maxWidth: "78%", padding: "10px 13px", borderRadius: 14,
+                borderBottomRightRadius: isCustomer ? 4 : 14,
+                borderBottomLeftRadius: isCustomer ? 14 : 4,
+                background: isCustomer ? "var(--stamp)" : "var(--paper-white)",
+                color: isCustomer ? "#fff" : "var(--ink)",
+                border: isCustomer ? "none" : "1.5px solid var(--line)",
+                fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {m.text}
+              </div>
+            </div>
           );
         })}
+        <div ref={bottomRef} />
       </div>
-      <div style={{ padding: "4px 18px 18px" }}>
-        <PrimaryButton disabled={!canNext} onClick={() => go("options")}>{TEXTS.nextOptions}</PrimaryButton>
+
+      <div style={{ padding: "12px 18px 6px" }}>
+        <div style={{ fontSize: 10, color: "var(--ink-soft)", textAlign: "center", marginBottom: 6 }}>{TEXTS.inquiryPreviewNote}</div>
+        <button
+          onClick={handlePreviewAdminReply}
+          style={{
+            width: "100%", background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
+            borderRadius: 10, fontSize: 12, fontWeight: 700, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
+          }}
+        >
+          {TEXTS.inquiryPreviewReplyBtn}
+        </button>
+      </div>
+
+      <div style={{ padding: "0 18px 18px", display: "flex", gap: 8 }}>
+        <input
+          style={{ ...inputStyle, flex: 1 }}
+          placeholder={TEXTS.inquiryPlaceholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={!text.trim() || sending}
+          style={{
+            width: 64, borderRadius: 10, border: "none",
+            background: text.trim() ? "var(--stamp)" : "var(--line)",
+            color: text.trim() ? "#fff" : "var(--ink-soft)",
+            fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", fontFamily: "inherit",
+          }}
+        >
+          {TEXTS.inquirySendBtn}
+        </button>
       </div>
     </div>
   );
 }
 
-function OptionSelect({ order, patch, go, back, category, paper, catOptions, unit, optTotal, goodsTotal }) {
-  const printSideOption = catOptions.find((o) => o.code === "OPT001");
-  const otherOptions = catOptions.filter((o) => o.code !== "OPT001");
-  // 2026-08-01: "기본값이 단면이라 그냥 지나치는 사람이 많다"는 요청으로 추가.
-  // 디자인 화면으로 넘어가기 직전, 단면/양면 중 뭘 골랐는지 한 번 더 확인시킵니다 —
-  // 꼼꼼히 안 읽고 넘어가는 사람도 이 확인창은 멈춰서 보게 됩니다.
-  const [showPrintSideConfirm, setShowPrintSideConfirm] = useState(false);
+// ==================== domain/company/supabaseAuth ====================
+// ====================================================================
+// Domain : Company / Supabase Auth
+// Responsibility : 진짜 전화번호 인증(가입 1회) + 비밀번호 로그인.
+//
+// 왜 @supabase/supabase-js 대신 fetch를 직접 쓰는가: 이 미리보기 환경(Claude
+// 아티팩트)에서 쓸 수 있는 라이브러리 목록에 supabase-js가 없습니다. 다행히
+// Supabase Auth(GoTrue)는 그냥 REST API라서, EmailJS 연동 때와 똑같은 방식
+// (raw fetch)으로 그대로 호출할 수 있습니다 — SDK가 하는 일이 결국 이 REST
+// 호출을 감싸는 것뿐이라, 기능상 차이는 없습니다.
+//
+// ⚠️ 설정 필요: 아래 두 값을 실제 프로젝트 값으로 채워야 합니다.
+const SUPABASE_URL = "https://wzqgbiedddquaataybvw.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ZRboBtWv9S6LxToeORG-zA_oCmYLcjg";
+// "비밀 키"(sb_secret_...)는 여기에 절대 넣지 않습니다 — 이건 서버 전용이고,
+// 이 파일은 브라우저에서 돌아가는 화면 코드라 넣으면 그대로 노출됩니다.
+// ====================================================================
 
-  const toggleSimple = (code) => {
-    const next = { ...order.selOptions };
-    if (next[code]) delete next[code]; else next[code] = { choice: null };
-    patch({ selOptions: next });
-  };
-  const setChoice = (o, value) => {
-    if (o.multi) {
-      const current = order.selOptions[o.code]?.choice;
-      const arr = Array.isArray(current) ? current : [];
-      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
-      patch({ selOptions: { ...order.selOptions, [o.code]: { choice: next } } });
-    } else {
-      patch({ selOptions: { ...order.selOptions, [o.code]: { choice: value } } });
-    }
-  };
-  const setPrintSide = (value) => {
-    patch({ selOptions: { ...order.selOptions, OPT001: { choice: value } } });
-  };
+async function authFetch(path, body) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // Supabase는 실패해도 보통 { error_description } 또는 { msg }로 이유를 줍니다.
+    throw new Error(data.error_description || data.msg || data.error || `요청 실패 (${res.status})`);
+  }
+  return data;
+}
 
-  const canNext = !printSideOption || !!order.selOptions.OPT001?.choice;
+// 전화번호로 인증코드(SMS)를 보냅니다. 실제로 문자가 나가려면, Supabase 대시보드의
+// Authentication → Providers → Phone에서 문자발송 업체(SMS Provider, 예: Twilio,
+// 또는 Supabase가 지원하는 다른 업체)를 연결해둬야 합니다 — 이 코드만으로는
+// "인증 로직"만 되는 거고, 실제 문자 발송 업체 연결은 별도 설정입니다.
+async function sendPhoneOtp(phone) {
+  return authFetch("/otp", { phone });
+}
 
+// 사용자가 문자로 받은 코드를 입력하면, 그게 맞는지 Supabase에 확인합니다.
+// 성공하면 access_token(로그인 세션)을 돌려받습니다 — 이게 "이 사람이 진짜
+// 이 번호의 주인임을 증명했다"는 증표입니다.
+async function verifyPhoneOtp(phone, token) {
+  return authFetch("/verify", { type: "sms", phone, token });
+}
+
+// 전화 인증이 끝난 뒤, 그 계정에 비밀번호를 설정합니다(가입 시 1회).
+// access_token은 verifyPhoneOtp()가 돌려준 값을 그대로 씁니다.
+async function setPasswordAfterVerification(accessToken, password) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error_description || data.msg || `비밀번호 설정 실패 (${res.status})`);
+  return data;
+}
+
+// 이후 로그인 — 문자 인증 없이, 전화번호+비밀번호만으로 확인합니다.
+async function signInWithPassword(phone, password) {
+  return authFetch("/token?grant_type=password", { phone, password });
+}
+
+// ==================== screens/Auth ====================
+// Supabase는 국제 표준 형식(+82...)을 요구합니다 — "010-1234-5678"처럼 한국식으로
+// 입력해도 자동으로 변환해줍니다.
+function toE164(krPhone) {
+  const digits = (krPhone || "").replace(/\D/g, "");
+  if (digits.startsWith("0")) return `+82${digits.slice(1)}`;
+  if (digits.startsWith("82")) return `+${digits}`;
+  return `+82${digits}`;
+}
+
+function Auth({ order, patch, go, back }) {
+  const [mode, setMode] = useState("login");
+  const [code, setCode] = useState("");
+  const [otpInput, setOtpInput] = useState("");
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const [otpAccessToken, setOtpAccessToken] = useState(null);
+  const [loginPasswordInput, setLoginPasswordInput] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // 회원 종류를 안 고르면 왜 버튼이 안 눌리는지 알기 어려워서(실제로 이 문제로 막히는 경우가 있었음),
+  // 화면에 들어오면 일반회원을 기본값으로 미리 선택해둡니다. 특별회원이 필요하면 직접 눌러서 바꾸면 됩니다.
+  React.useEffect(() => {
+    if (!order.memberType) patch({ memberType: "general" });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const missingSignupSteps = [];
+  if (!order.memberType) missingSignupSteps.push(TEXTS.memberKindLabel);
+  if (!order.name) missingSignupSteps.push(TEXTS.nameLabel);
+  if (!order.phoneVerified) missingSignupSteps.push(TEXTS.verifiedStamp);
+  if (!order.password || order.password.length < 4) missingSignupSteps.push(TEXTS.passwordLabel);
+  if (order.memberType === "special" && !order.company) missingSignupSteps.push(TEXTS.companyLabel);
+  if (order.memberType === "special" && !order.bizDoc) missingSignupSteps.push(TEXTS.bizDocLabel);
+  const canSubmitSignup = missingSignupSteps.length === 0;
   return (
     <div className="app-body">
-      <TopBar title={TEXTS.optionScreenTitle} sub={`${category?.name} · ${paper?.name}`} onBack={back} step={2} go={go} />
-      <div style={{ padding: "6px 18px 4px" }}>
-        {category?.note && (
-          <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.categoryNotePrefix} <b style={{ color: "var(--ink)" }}>{category.note}</b> {TEXTS.categoryNoteSuffix}</div>
-          </Card>
-        )}
-        {/* 2026-08-02: "빠른스노우250g는 익일출고를 위해 옵션을 못 받게 해달라"는
-            요청 반영 — 인쇄방식(단면/양면)은 그대로 고를 수 있지만, 다른 옵션은
-            availableOptions()에서 이미 목록 자체가 안 뜨도록 걸러져 있습니다. 여기서는
-            "왜 옵션이 안 보이는지"를 고객에게 설명해줍니다. */}
-        {paper?.restrictedOptions && (
-          <div style={{
-            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-            borderRadius: 10, padding: "10px 12px", marginBottom: 12, lineHeight: 1.5,
-          }}>
-            {TEXTS.restrictedOptionsNotice}
-          </div>
-        )}
+      <TopBar title={TEXTS.authTitle} onBack={back} step={3} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {["login", "signup"].map((m) => (
+            <button key={m} onClick={() => setMode(m)} style={{
+              flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+              border: `1.5px solid ${mode === m ? "var(--stamp)" : "var(--line)"}`,
+              background: mode === m ? "var(--stamp)" : "var(--paper-white)",
+              color: mode === m ? "#fff" : "var(--ink)",
+            }}>
+              {m === "signup" ? TEXTS.tabSignup : TEXTS.tabLogin}
+            </button>
+          ))}
+        </div>
 
-        {printSideOption && (
-          <Card style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{printSideOption.name}</div>
-            <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-              {printSideOption.choice.map((c) => {
-                const sel = order.selOptions.OPT001?.choice === c.value;
-                return (
+        {mode === "signup" && (
+          <>
+            <Field label={TEXTS.memberKindLabel}>
+              <div style={{ display: "flex", gap: 10 }}>
+                {[
+                  { k: "general", label: TEXTS.memberKindGeneralLabel, d: TEXTS.memberKindGeneralDesc },
+                  { k: "special", label: TEXTS.memberKindSpecialLabel, d: TEXTS.memberKindSpecialDesc },
+                ].map((m) => (
+                  <div key={m.k} onClick={() => patch({ memberType: m.k })} style={{
+                    flex: 1, cursor: "pointer", borderRadius: 12, padding: "12px 12px",
+                    border: `1.5px solid ${order.memberType === m.k ? "var(--stamp)" : "var(--line)"}`,
+                    background: order.memberType === m.k ? "rgba(108,76,240,0.06)" : "var(--paper-white)",
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>{m.label}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3, lineHeight: 1.4 }}>{m.d}</div>
+                  </div>
+                ))}
+              </div>
+            </Field>
+            {/* 2026-08-02: "특별회원 가입을 누르면 AI디자인이 안 되고 인쇄파일
+                업로드만 가능하다는 안내가 필요하다"는 요청 반영 — 기본값은 일반회원
+                그대로 두고(위 useEffect), 특별회원을 직접 고른 경우에만 뜹니다. */}
+            {order.memberType === "special" && (
+              <div style={{
+                fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+                borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
+              }}>
+                {TEXTS.specialMemberNotice}
+              </div>
+            )}
+            <Field label={TEXTS.nameLabel}><input style={inputStyle} placeholder={TEXTS.namePlaceholder} value={order.name} onChange={(e) => patch({ name: e.target.value })} /></Field>
+            <Field label={TEXTS.phoneLabel}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input style={{ ...inputStyle, flex: 1 }} placeholder={TEXTS.phonePlaceholder} value={order.phone} onChange={(e) => patch({ phone: e.target.value, phoneVerified: false })} />
+                <button
+                  style={{ ...stepperBtn, width: 80, fontSize: 12, fontWeight: 700 }}
+                  disabled={!order.phone || sendingOtp}
+                  onClick={async () => {
+                    setSendingOtp(true);
+                    setOtpError("");
+                    try {
+                      await sendPhoneOtp(toE164(order.phone));
+                      setCode("sent"); // 실제 코드는 사용자 휴대폰으로만 가고 여기선 모릅니다 — Supabase가 검증을 대신 해줍니다.
+                    } catch (err) {
+                      setOtpError(err.message);
+                    } finally {
+                      setSendingOtp(false);
+                    }
+                  }}
+                >
+                  {sendingOtp ? TEXTS.verifyRequestSending : TEXTS.verifyRequestBtn}
+                </button>
+              </div>
+              {otpError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 4 }}>{otpError}</div>}
+              {/* ⚠️ 미리보기 전용 임시 버튼 — 실제 배포 전에는 반드시 지워야 합니다.
+                  이 아티팩트 미리보기 환경이 외부 서버 호출(Supabase 등)을 막고 있어서
+                  실제 인증을 여기서는 확인할 수 없어, 나머지 화면(디자인·결제 등)을
+                  계속 테스트할 수 있도록 건너뛰기만 열어둔 것입니다. 실제 웹사이트로
+                  배포되면 이 CSP 제한이 없어져서 진짜 인증이 정상 작동하니, 그때는
+                  이 버튼을 지워야 합니다 — 안 지우면 아무나 인증 없이 가입할 수 있게
+                  되는 진짜 보안 구멍이 됩니다. */}
+              {otpError && (
+                <button
+                  onClick={() => patch({ phoneVerified: true })}
+                  style={{
+                    marginTop: 6, width: "100%", background: "none", border: "1.4px dashed var(--ink-soft)",
+                    borderRadius: 10, padding: "8px 0", fontSize: 11, color: "var(--ink-soft)", cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  {TEXTS.previewSkipVerifyBtn}
+                </button>
+              )}
+            </Field>
+            {code && !order.phoneVerified && (
+              <Field label={TEXTS.verifyCodeLabel}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input style={{ ...inputStyle, flex: 1 }} placeholder={TEXTS.verifyCodePlaceholder} value={otpInput} onChange={(e) => setOtpInput(e.target.value)} />
                   <button
-                    key={c.value}
-                    onClick={() => setPrintSide(c.value)}
-                    style={{
-                      flex: 1, fontSize: 12.5, padding: "10px 8px", borderRadius: 10, cursor: "pointer",
-                      border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
-                      background: sel ? "var(--stamp)" : "var(--paper-white)",
-                      color: sel ? "#fff" : "var(--ink)",
-                      fontFamily: "inherit", fontWeight: 700,
+                    style={{ ...stepperBtn, width: 80, fontSize: 11 }}
+                    disabled={!otpInput || verifyingOtp}
+                    onClick={async () => {
+                      setVerifyingOtp(true);
+                      setOtpError("");
+                      try {
+                        const result = await verifyPhoneOtp(toE164(order.phone), otpInput);
+                        setOtpAccessToken(result.access_token || null);
+                        patch({ phoneVerified: true });
+                      } catch (err) {
+                        setOtpError(err.message);
+                      } finally {
+                        setVerifyingOtp(false);
+                      }
                     }}
                   >
-                    {c.label}
+                    {verifyingOtp ? TEXTS.verifyChecking : TEXTS.verifyCheckBtn}
                   </button>
-                );
-              })}
+                </div>
+              </Field>
+            )}
+            {order.phoneVerified && <Stamp active>{TEXTS.verifiedStamp}</Stamp>}
+
+            {order.phoneVerified && (
+              <Field label={TEXTS.passwordLabel}>
+                <input
+                  type="password" style={inputStyle} placeholder={TEXTS.passwordPlaceholder}
+                  value={order.password} onChange={(e) => patch({ password: e.target.value })}
+                />
+                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.passwordHint}</div>
+              </Field>
+            )}
+
+            {order.memberType === "special" && (
+              <>
+                <div style={{ height: 8 }} />
+                <Field label={TEXTS.companyLabel}><input style={inputStyle} placeholder={TEXTS.companyPlaceholder} value={order.company} onChange={(e) => patch({ company: e.target.value })} /></Field>
+                <Field label={TEXTS.bizDocLabel}>
+                  <UploadBox
+                    label={TEXTS.bizDocUploadPrompt}
+                    icon={Upload}
+                    done={!!order.bizDoc}
+                    fileName={order.bizDocFile?.name}
+                    accept=".png,.jpg,.jpeg,.pdf"
+                    onFile={(f) => patch({ bizDoc: true, bizDocFile: f })}
+                  />
+                </Field>
+                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.bizDocUploadHint}</div>
+              </>
+            )}
+
+            <div style={{ marginTop: 10 }}>
+              {otpError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 8 }}>{otpError}</div>}
+              <PrimaryButton
+                disabled={!canSubmitSignup || sendingOtp}
+                onClick={async () => {
+                  // 비밀번호를 실제 Supabase 계정에 설정합니다 — 이게 돼야 다음부터
+                  // 문자인증 없이 비밀번호로 로그인할 수 있습니다.
+                  if (otpAccessToken) {
+                    try {
+                      await setPasswordAfterVerification(otpAccessToken, order.password);
+                    } catch (err) {
+                      setOtpError(err.message);
+                      return;
+                    }
+                  }
+                  if (order.memberType === "special") {
+                    // 특별회원(기업)은 사업자등록증 승인 전까지는 로그인 완료 상태(authed)로 만들지 않습니다.
+                    patch({ authed: false });
+                    go("pendingApproval");
+                  } else {
+                    patch({ authed: true });
+                    go("design");
+                  }
+                }}
+              >
+                {order.memberType === "special" ? TEXTS.signupSubmitSpecial : TEXTS.signupSubmitGeneral}
+              </PrimaryButton>
+              {!canSubmitSignup && (
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
+                  {TEXTS.missingFieldsHint}{missingSignupSteps.join(", ")}
+                </div>
+              )}
             </div>
-          </Card>
+          </>
         )}
 
-        {otherOptions.length === 0 && !printSideOption && (
-          <div style={{ fontSize: 13, color: "var(--ink-soft)", padding: "10px 2px" }}>{TEXTS.noOptionsAvailable}</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {otherOptions.map((o) => {
-            const checked = !!order.selOptions[o.code];
-            const fee = optionFee(o, order.selOptions);
-            const feeLabel = fee > 0 ? `+${won(fee)}` : TEXTS.noExtraFee;
-            return (
-              <Card key={o.code} selected={checked} onClick={() => toggleSimple(o.code)}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{o.name}</div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 700, color: fee ? "var(--stamp)" : "var(--ink-soft)" }}>{feeLabel}</span>
-                    <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${checked ? "var(--stamp)" : "var(--line)"}`, background: checked ? "var(--stamp)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {checked && <Check size={13} color="#fff" />}
-                    </div>
-                  </div>
-                </div>
-                {checked && o.choice && (
-                  <>
-                    {o.multi && <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 8 }}>{TEXTS.multiChoiceHintPrefix}{o.choice.length}{TEXTS.multiChoiceHintSuffix}</div>}
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
-                      {o.choice.map((c) => {
-                        const sel = o.multi
-                          ? (Array.isArray(order.selOptions[o.code]?.choice) && order.selOptions[o.code].choice.includes(c.value))
-                          : order.selOptions[o.code]?.choice === c.value;
-                        return (
-                          <button
-                            key={c.value}
-                            onClick={() => setChoice(o, c.value)}
-                            style={{
-                              fontSize: 11.5, padding: "6px 10px", borderRadius: 999, cursor: "pointer",
-                              border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
-                              background: sel ? "var(--stamp)" : "var(--paper-white)",
-                              color: sel ? "#fff" : "var(--ink)",
-                              fontFamily: "inherit", fontWeight: 600,
-                            }}
-                          >
-                            {c.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-        <Field label={TEXTS.setQuantityLabel(paper?.sheets)}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={() => patch({ sets: Math.max(1, order.sets - 1) })} style={stepperBtn}>−</button>
-            <div style={{ fontSize: 16, fontWeight: 700, minWidth: 28, textAlign: "center" }}>{order.sets}</div>
-            <button onClick={() => patch({ sets: order.sets + 1 })} style={stepperBtn}>+</button>
-          </div>
-          {paper?.sheets && order.sets > 1 && (
-            <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>
-              {TEXTS.setQuantityTotalSheets(order.sets, paper.sheets * order.sets)}
-            </div>
-          )}
-          {order.memberType === "general" && (
-            <div style={{ marginTop: 8 }}>
-              <Stamp active={order.sets >= 3} tone={order.sets >= 3 ? "gold" : "stamp"}>
-                {order.sets >= 3 ? TEXTS.freeShipReached : TEXTS.freeShipRemaining(3 - order.sets)}
-              </Stamp>
-            </div>
-          )}
-        </Field>
-        <Card style={{ background: "var(--paper-deep)", border: "none", marginTop: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-soft)" }}>
-            <span>{TEXTS.paperLineLabel(order.sets, won(unit))}</span><span>{won(unit * order.sets)}</span>
-          </div>
-          {optTotal > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4 }}>
-              <span>{TEXTS.optionLineLabel(order.sets, won(optTotal))}</span><span>{won(optTotal * order.sets)}</span>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900, marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
-            <span>{TEXTS.goodsTotalLabel}</span><span style={{ color: "var(--stamp)" }}>{won(goodsTotal)}</span>
-          </div>
-        </Card>
-      </div>
-      <div style={{ padding: "16px 18px 18px" }}>
-        <PrimaryButton
-          disabled={!canNext}
-          onClick={() => (printSideOption ? setShowPrintSideConfirm(true) : go(order.authed ? "design" : "auth"))}
-        >
-          {TEXTS.nextPrefix}{order.authed ? TEXTS.nextDesign : TEXTS.nextSignupLogin}
-        </PrimaryButton>
-        {!canNext && (
-          <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
-            {TEXTS.missingFieldsHint}{printSideOption?.name}
-          </div>
+        {mode === "login" && (
+          <>
+            {/* 로그인마다 문자인증을 다시 하면 보낼 때마다 비용이 들고, 실제 앱들도
+                이렇게 안 합니다 — 문자인증은 가입 시 "이 번호의 주인이 맞다"를 한 번만
+                증명하는 용도고, 그다음부터는 아이디(전화번호)+비밀번호로 로그인합니다. */}
+            <Field label={TEXTS.phoneLabel}><input style={inputStyle} placeholder={TEXTS.phonePlaceholder} value={order.phone} onChange={(e) => patch({ phone: e.target.value })} /></Field>
+            <Field label={TEXTS.passwordLabel}><input type="password" style={inputStyle} placeholder={TEXTS.passwordLoginPlaceholder} value={loginPasswordInput} onChange={(e) => setLoginPasswordInput(e.target.value)} /></Field>
+            {loginError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 8 }}>{loginError}</div>}
+            <PrimaryButton
+              disabled={!order.phone || !loginPasswordInput || loggingIn}
+              onClick={async () => {
+                setLoggingIn(true);
+                setLoginError("");
+                try {
+                  const result = await signInWithPassword(toE164(order.phone), loginPasswordInput);
+                  patch({
+                    authed: true, phoneVerified: true,
+                    memberType: order.memberType || "general", name: order.name || TEXTS.defaultMemberName,
+                  });
+                  go("design");
+                } catch (err) {
+                  // ⚠️ 미리보기 전용 폴백 — 실제 배포 전에는 반드시 지워야 합니다.
+                  // 이 아티팩트 미리보기 환경이 외부 서버 호출을 막고 있어서, 여기서는
+                  // 진짜 서버 응답을 못 받습니다. 대신 지금 이 세션에 남아있는
+                  // order.password와 직접 비교해서, 나머지 화면 테스트를 계속할 수
+                  // 있게만 열어둡니다 — 이건 진짜 인증이 아니라 세션 안에서만
+                  // 의미 있는 임시 비교라, 실제 배포 시엔 반드시 지워야 합니다.
+                  if (order.password && loginPasswordInput === order.password) {
+                    patch({ authed: true, memberType: order.memberType || "general", name: order.name || TEXTS.defaultMemberName });
+                    go("design");
+                  } else {
+                    setLoginError(err.message || TEXTS.loginPasswordError);
+                  }
+                } finally {
+                  setLoggingIn(false);
+                }
+              }}
+            >
+              {loggingIn ? TEXTS.loggingInLabel : TEXTS.loginSubmit}
+            </PrimaryButton>
+          </>
         )}
       </div>
-      {showPrintSideConfirm && (
-        <ConfirmDialog
-          title={TEXTS.printSideConfirmTitle}
-          message={TEXTS.printSideConfirmMessage(printSideOption?.choice.find((c) => c.value === order.selOptions.OPT001?.choice)?.label || "")}
-          cancelLabel={TEXTS.printSideConfirmCancel}
-          confirmLabel={TEXTS.printSideConfirmProceed}
-          onCancel={() => setShowPrintSideConfirm(false)}
-          onConfirm={() => {
-            setShowPrintSideConfirm(false);
-            go(order.authed ? "design" : "auth");
-          }}
-        />
-      )}
     </div>
   );
 }
 
-// stepperBtn: components/ui.js 로 이동 (Home/Auth/Complete에서도 공용으로 씀)
+function PendingApproval({ order, patch, go, back }) {
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.pendingTitle} onBack={back} step={3} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <Card style={{ textAlign: "center", padding: "26px 16px" }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: "50%", background: "var(--paper-deep)",
+            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px",
+          }}>
+            <Upload size={22} color="var(--stamp)" />
+          </div>
+          <div style={{ fontSize: 14.5, fontWeight: 800 }}>{TEXTS.pendingHeadline}</div>
+          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.6, whiteSpace: "pre-line" }}>
+            {TEXTS.pendingBody}
+          </div>
+        </Card>
+
+        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", textAlign: "center", marginTop: 14 }}>
+          {TEXTS.pendingPreviewNote}
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <PrimaryButton onClick={() => patch({ authed: true })} icon={Check}>
+            {TEXTS.pendingApproveBtn}
+          </PrimaryButton>
+        </div>
+
+        {order.authed && (
+          <div style={{ marginTop: 10 }}>
+            <PrimaryButton onClick={() => go("design")}>{TEXTS.pendingContinueBtn}</PrimaryButton>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== utils/format ====================
+const won = (n) => `${Math.round(n).toLocaleString("ko-KR")}원`;
 
 // ==================== domain/config/serverConfig ====================
 // 2026-08-04: 실제 백엔드 서버(Render)가 배포되면서 추가 — 이 주소 하나가 프론트엔드가
@@ -1294,101 +1434,6 @@ async function confirmDeposit(orderNo, token) {
     throw new Error(body.error || "입금확인 처리에 실패했습니다.");
   }
   return res.json();
-}
-
-// ==================== domain/company/orderNotification ====================
-// ====================================================================
-// Domain : Company / Order Notification
-// Responsibility : 새 주문이 들어오면 관리자(goodplus.kr@gmail.com)에게 이메일로
-//                  알려줍니다. emailVerification.js(회사 이메일 소유 확인)와는
-//                  완전히 다른 기능입니다 — 저건 사용자가 입력한 이메일 주소가
-//                  진짜 자기 것인지 확인하는 용도이고, 이건 사장님 본인에게
-//                  "주문이 들어왔다"를 알리는 용도입니다. 서로 다른 EmailJS 템플릿을
-//                  씁니다(변수가 다름: 이쪽은 {{name}}/{{message}}/{{order_id}}).
-//
-// 여기 SERVICE_ID/TEMPLATE_ID는 자리표시자가 아니라, 예전 세션에서 실제로 테스트
-// 발송까지 확인된 값입니다(2026-07-29, service_c48f848 / template_fgijlbe,
-// Gmail 수신 확인됨). 다만 "To Email"은 코드가 아니라 EmailJS 템플릿 자체 설정에
-// 고정되어 있어서(goodplus.kr@gmail.com), 여기서 template_params로 보내지 않습니다.
-// ====================================================================
-const ORDER_EMAILJS_SERVICE_ID = "service_c48f848";
-const EMAILJS_ORDER_TEMPLATE_ID = "template_fgijlbe";
-// PUBLIC_KEY도 emailVerification.js와 같은 EmailJS 계정 값으로 확인됐습니다.
-const ORDER_EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
-
-// order 객체에서 사람이 읽기 좋은 주문 요약 텍스트를 만듭니다. 어떤 필드가 정확히
-// 있는지는 App.jsx의 order 상태 모양을 따릅니다 — 없는 필드는 조용히 건너뜁니다.
-function buildOrderSummary(order, extra = {}) {
-  const lines = [
-    extra.categoryName && `카테고리: ${extra.categoryName}`,
-    extra.paperName && `용지: ${extra.paperName}`,
-    order.sets && `수량: ${order.sets}세트`,
-    extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
-    extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
-    order.depositor && `입금자명: ${order.depositor}`,
-    order.ship?.name && `받는분: ${order.ship.name}`,
-    order.ship?.phone && `연락처: ${order.ship.phone}`,
-    order.ship?.addr && `주소: ${order.ship.addr}`,
-    // 뒷면을 "직접 설명하기"로 고른 경우, 정해진 템플릿 없이 담당자가 직접 만들어야
-    // 하므로 그 설명을 반드시 여기 남깁니다 — 첨부는 앞면 파일 하나만 가는 구조라서
-    // (아래 한계 참고), 참고 이미지를 올렸다면 그 사실도 같이 알려줍니다.
-    order.backCustomNote && `\n[뒷면 직접 요청]\n${order.backCustomTags?.length ? `희망 내용: ${order.backCustomTags.join(", ")}\n` : ""}${order.backCustomNote}`,
-    order.backCustomFile && `(뒷면 참고 이미지 첨부됨 — 파일명: ${order.backCustomFile.name}. 첨부 슬롯은 앞면 파일과 공유라 안 붙었을 수 있어요, 확인 필요)`,
-  ].filter(Boolean);
-  return lines.join("\n");
-}
-
-// 파일을 base64로 바꿉니다 — 이메일 첨부와 window.storage 저장 둘 다 이 형태가 필요해서
-// 이름을 용도 하나에 묶지 않고 범용으로 둡니다.
-function fileToBase64DataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// window.storage는 텍스트 전용, 한 값당 5MB 제한입니다. base64로 바꾸면 원본보다
-// 커지므로(약 1.33배), 원본 기준 이 크기까지만 저장을 "시도"합니다. 저장은 의무가
-// 아니라 재주문 편의를 위한 정책일 뿐이라, 안 되면 강제로 방법을 찾지 않고 그냥
-// "용량이 커서 저장이 안 된다"고 안내하고 넘어갑니다.
-const MAX_STORABLE_FILE_BYTES = 3 * 1024 * 1024;
-
-// ⚠️ 설정 필요: EmailJS에서 첨부파일 발송은 유료 플랜에서만 됩니다(2026-07-30 기준
-// 공식 문서 확인). 그리고 템플릿의 Attachments 탭에 "Variable Attachment" 타입으로
-// 파라미터 이름(예: attachment)을 등록해둬야, 여기서 보내는 값이 실제로 첨부됩니다 —
-// 코드만으로는 안 되고 EmailJS 대시보드에서 템플릿 설정을 한 번 해주셔야 합니다.
-//
-// attachment는 File 객체(특별회원이 올린 파일)이거나, { dataUrl } 형태로 이미 계산된
-// base64(AI가 만든 인쇄용 SVG — 이미 텍스트라 File로 감쌀 필요 없이 바로 씀)일 수 있습니다.
-async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment = null) {
-  const message = buildOrderSummary(order, extra);
-  const templateParams = {
-    name: order.ship?.name || order.depositor || "고객",
-    message,
-    order_id: orderNo,
-  };
-  if (attachment) {
-    try {
-      templateParams.attachment = attachment.dataUrl ? attachment.dataUrl : await fileToBase64DataUrl(attachment);
-    } catch {
-      // 첨부 변환에 실패해도 주문 알림 이메일 자체는 보내야 하므로 무시하고 진행
-    }
-  }
-  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: ORDER_EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_ORDER_TEMPLATE_ID,
-      user_id: ORDER_EMAILJS_PUBLIC_KEY,
-      template_params: templateParams,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`주문 알림 이메일 발송 실패 (${res.status})`);
-  }
 }
 
 // ==================== domain/kernel/designRules ====================
@@ -1615,19 +1660,6 @@ function getQrSizePercent(mode) {
 
 // CP-001 판정(구조적 체크)은 /domain/validation/cpValidator.js(validateCP)로 이전됨 —
 // Kernel은 규칙을 "정의"하는 곳이고, 판정은 Validation의 역할입니다.
-
-// ==================== domain/frame/index ====================
-// Frame Domain — Recommendation이 고른 값을 실제 배치표로 바꿉니다.
-// (Recommendation → Frame → Asset → Kernel(DRS) → 최종 디자인)
-//
-// Frame Domain Roadmap
-//   Phase 1 [x] templates.js / photoTemplates.js / backLayouts.js / frameResolver.js
-//   Phase 2 [x] frameCodes.js — 업종-타입 코드 체계(v1, 신규 설계). "INS-F001" 스펙은
-//     실재를 확인할 수 없어(다른 세션의 Core_Principles.md/Issue_Registry_v1.0.md에도
-//     없음) 그대로 쓰지 않고, 실제 존재하는 업종(INDUSTRY_KEYWORDS)·템플릿(TEMPLATES/
-//     PHOTO_TEMPLATES)만 근거로 새로 설계했습니다. 업종별로 실제 다른 레이아웃을 만드는
-//     기능은 아직 없습니다(전 업종이 같은 TEMPLATE_LAYOUTS를 공유) — frameCode의 업종
-//     부분은 지금은 추천 이유 설명용이고, 실제 레이아웃 분기는 나중에 필요해지면 추가.
 
 // ==================== domain/pattern/patternLibrary ====================
 // ====================================================================
@@ -2068,6 +2100,19 @@ function getPhotoLayoutFor(photoVariant) {
   };
 }
 
+// ==================== domain/frame/index ====================
+// Frame Domain — Recommendation이 고른 값을 실제 배치표로 바꿉니다.
+// (Recommendation → Frame → Asset → Kernel(DRS) → 최종 디자인)
+//
+// Frame Domain Roadmap
+//   Phase 1 [x] templates.js / photoTemplates.js / backLayouts.js / frameResolver.js
+//   Phase 2 [x] frameCodes.js — 업종-타입 코드 체계(v1, 신규 설계). "INS-F001" 스펙은
+//     실재를 확인할 수 없어(다른 세션의 Core_Principles.md/Issue_Registry_v1.0.md에도
+//     없음) 그대로 쓰지 않고, 실제 존재하는 업종(INDUSTRY_KEYWORDS)·템플릿(TEMPLATES/
+//     PHOTO_TEMPLATES)만 근거로 새로 설계했습니다. 업종별로 실제 다른 레이아웃을 만드는
+//     기능은 아직 없습니다(전 업종이 같은 TEMPLATE_LAYOUTS를 공유) — frameCode의 업종
+//     부분은 지금은 추천 이유 설명용이고, 실제 레이아웃 분기는 나중에 필요해지면 추가.
+
 // ==================== domain/export/cardFileExporter ====================
 // ====================================================================
 // Domain : Export / Card File Exporter
@@ -2354,6 +2399,166 @@ function buildDoubleSidedSVG(frontSvgInner, backLayoutChoice, frontSpec, logoDat
   return parts.join("\n");
 }
 
+// ==================== domain/company/orderNotification ====================
+// ====================================================================
+// Domain : Company / Order Notification
+// Responsibility : 새 주문이 들어오면 관리자(goodplus.kr@gmail.com)에게 이메일로
+//                  알려줍니다. emailVerification.js(회사 이메일 소유 확인)와는
+//                  완전히 다른 기능입니다 — 저건 사용자가 입력한 이메일 주소가
+//                  진짜 자기 것인지 확인하는 용도이고, 이건 사장님 본인에게
+//                  "주문이 들어왔다"를 알리는 용도입니다. 서로 다른 EmailJS 템플릿을
+//                  씁니다(변수가 다름: 이쪽은 {{name}}/{{message}}/{{order_id}}).
+//
+// 여기 SERVICE_ID/TEMPLATE_ID는 자리표시자가 아니라, 예전 세션에서 실제로 테스트
+// 발송까지 확인된 값입니다(2026-07-29, service_c48f848 / template_fgijlbe,
+// Gmail 수신 확인됨). 다만 "To Email"은 코드가 아니라 EmailJS 템플릿 자체 설정에
+// 고정되어 있어서(goodplus.kr@gmail.com), 여기서 template_params로 보내지 않습니다.
+// ====================================================================
+const ORDER_EMAILJS_SERVICE_ID = "service_c48f848";
+const EMAILJS_ORDER_TEMPLATE_ID = "template_fgijlbe";
+// PUBLIC_KEY도 emailVerification.js와 같은 EmailJS 계정 값으로 확인됐습니다.
+const ORDER_EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+
+// order 객체에서 사람이 읽기 좋은 주문 요약 텍스트를 만듭니다. 어떤 필드가 정확히
+// 있는지는 App.jsx의 order 상태 모양을 따릅니다 — 없는 필드는 조용히 건너뜁니다.
+function buildOrderSummary(order, extra = {}) {
+  const lines = [
+    extra.categoryName && `카테고리: ${extra.categoryName}`,
+    extra.paperName && `용지: ${extra.paperName}`,
+    order.sets && `수량: ${order.sets}세트`,
+    extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
+    extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
+    order.depositor && `입금자명: ${order.depositor}`,
+    order.ship?.name && `받는분: ${order.ship.name}`,
+    order.ship?.phone && `연락처: ${order.ship.phone}`,
+    order.ship?.addr && `주소: ${order.ship.addr}`,
+    // 뒷면을 "직접 설명하기"로 고른 경우, 정해진 템플릿 없이 담당자가 직접 만들어야
+    // 하므로 그 설명을 반드시 여기 남깁니다 — 첨부는 앞면 파일 하나만 가는 구조라서
+    // (아래 한계 참고), 참고 이미지를 올렸다면 그 사실도 같이 알려줍니다.
+    order.backCustomNote && `\n[뒷면 직접 요청]\n${order.backCustomTags?.length ? `희망 내용: ${order.backCustomTags.join(", ")}\n` : ""}${order.backCustomNote}`,
+    order.backCustomFile && `(뒷면 참고 이미지 첨부됨 — 파일명: ${order.backCustomFile.name}. 첨부 슬롯은 앞면 파일과 공유라 안 붙었을 수 있어요, 확인 필요)`,
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+// 파일을 base64로 바꿉니다 — 이메일 첨부와 window.storage 저장 둘 다 이 형태가 필요해서
+// 이름을 용도 하나에 묶지 않고 범용으로 둡니다.
+function fileToBase64DataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// window.storage는 텍스트 전용, 한 값당 5MB 제한입니다. base64로 바꾸면 원본보다
+// 커지므로(약 1.33배), 원본 기준 이 크기까지만 저장을 "시도"합니다. 저장은 의무가
+// 아니라 재주문 편의를 위한 정책일 뿐이라, 안 되면 강제로 방법을 찾지 않고 그냥
+// "용량이 커서 저장이 안 된다"고 안내하고 넘어갑니다.
+const MAX_STORABLE_FILE_BYTES = 3 * 1024 * 1024;
+
+// ⚠️ 설정 필요: EmailJS에서 첨부파일 발송은 유료 플랜에서만 됩니다(2026-07-30 기준
+// 공식 문서 확인). 그리고 템플릿의 Attachments 탭에 "Variable Attachment" 타입으로
+// 파라미터 이름(예: attachment)을 등록해둬야, 여기서 보내는 값이 실제로 첨부됩니다 —
+// 코드만으로는 안 되고 EmailJS 대시보드에서 템플릿 설정을 한 번 해주셔야 합니다.
+//
+// attachment는 File 객체(특별회원이 올린 파일)이거나, { dataUrl } 형태로 이미 계산된
+// base64(AI가 만든 인쇄용 SVG — 이미 텍스트라 File로 감쌀 필요 없이 바로 씀)일 수 있습니다.
+async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment = null) {
+  const message = buildOrderSummary(order, extra);
+  const templateParams = {
+    name: order.ship?.name || order.depositor || "고객",
+    message,
+    order_id: orderNo,
+  };
+  if (attachment) {
+    try {
+      templateParams.attachment = attachment.dataUrl ? attachment.dataUrl : await fileToBase64DataUrl(attachment);
+    } catch {
+      // 첨부 변환에 실패해도 주문 알림 이메일 자체는 보내야 하므로 무시하고 진행
+    }
+  }
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: ORDER_EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_ORDER_TEMPLATE_ID,
+      user_id: ORDER_EMAILJS_PUBLIC_KEY,
+      template_params: templateParams,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`주문 알림 이메일 발송 실패 (${res.status})`);
+  }
+}
+
+// ==================== data/options ====================
+// choice 항목은 { label, value } 형태입니다. 화면에는 label을 보여주고,
+// 저장·비교(가격 계산 등)에는 value(코드)를 사용해서 나중에 라벨 문구가 바뀌어도 로직이 깨지지 않게 했습니다.
+const OPTIONS = [
+  { code: "OPT001", name: "인쇄 방식", fee: 0, feeLabel: "추가금 없음", required: true, choice: [
+    { label: "단면명함", value: "single" }, { label: "양면명함", value: "double" },
+  ] },
+  { code: "OPT002", name: "귀도리(4mm)", fee: 2420, feeLabel: "+2,420원", multi: true, choice: [
+    { label: "좌상", value: "topLeft" }, { label: "좌하", value: "bottomLeft" }, { label: "우상", value: "topRight" }, { label: "우하", value: "bottomRight" },
+  ] },
+  { code: "OPT003", name: "타공(3mm)", fee: 3267, feeLabel: "+3,267원", choice: [
+    { label: "좌상", value: "topLeft" }, { label: "좌중", value: "midLeft" }, { label: "좌하", value: "bottomLeft" },
+    { label: "우상", value: "topRight" }, { label: "우중", value: "midRight" }, { label: "우하", value: "bottomRight" },
+  ] },
+  { code: "OPT004", name: "오시(1줄중앙)", fee: 6050, feeLabel: "+6,050원", choice: [
+    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
+  ] },
+  { code: "OPT005", name: "미싱(1줄 위치설정)", fee: 6050, feeLabel: "+6,050원", choice: [
+    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
+  ] },
+  { code: "OPT006", name: "넘버링", fee: 45980, feeLabel: "+45,980원", choice: null },
+];
+
+function availableOptions(category, paper) {
+  if (!category) return [];
+  let opts = OPTIONS;
+  if (category.onlyOptions) opts = opts.filter((o) => category.onlyOptions.includes(o.code));
+  if (category.printSides === false) opts = opts.filter((o) => o.code !== "OPT001");
+  if (category.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
+  if (paper && paper.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
+  // 2026-08-02: "빠른스노우250g는 익일출고를 위해 옵션을 못 받게 해달라. 다만
+  // 단면/양면(OPT001)은 그대로 고를 수 있어야 한다"는 요청 반영 — 이 용지만 인쇄
+  // 방식 외의 나머지 옵션(귀도리·타공·오시·미싱·넘버링)을 전부 제외합니다.
+  if (paper && paper.restrictedOptions) opts = opts.filter((o) => o.code === "OPT001");
+  return opts;
+}
+
+// 오시(OPT004)·미싱(OPT005)은 세로/가로 방향에 따라 기준가가 달라짐: 기준가 × 1.1 × 1.1
+// 세로 짧게: 5,000원 기준가 → 6,050원 / 가로 길게: 7,000원 기준가 → 8,470원
+function optionFee(o, selOptions) {
+  if (o.code === "OPT004" || o.code === "OPT005") {
+    const value = selOptions?.[o.code]?.choice;
+    const base = value === "horizontal" ? 7000 : 5000;
+    return Math.round(base * 1.1 * 1.1);
+  }
+  return o.fee;
+}
+
+// 용지 선택 시 기본으로 세팅할 옵션값 (인쇄 방식은 필수이므로 단면명함을 기본값으로 지정)
+function defaultSelOptions(category, paper) {
+  const opts = availableOptions(category, paper);
+  const hasPrintSide = opts.some((o) => o.code === "OPT001");
+  return hasPrintSide ? { OPT001: { choice: "single" } } : {};
+}
+
+// 옵션 + 선택값을 사람이 읽을 수 있는 문구로 변환 (예: "인쇄 방식(양면명함)", "귀도리(4mm)(좌상/우상)")
+function describeSelectedOption(o, sel) {
+  if (!o) return null;
+  if (!o.choice) return o.name;
+  const raw = sel?.choice;
+  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const labels = values.map((v) => o.choice.find((c) => c.value === v)?.label).filter(Boolean);
+  return labels.length ? `${o.name}(${labels.join("/")})` : o.name;
+}
+
 // ==================== screens/Payment ====================
 function Payment({ order, patch, go, back, paper, category, unit, optTotal, shipFee, goodsTotal, grandTotal }) {
   const [agreedTerms, setAgreedTerms] = useState(false);
@@ -2514,66 +2719,90 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
   );
 }
 
-// ==================== data/categories ====================
-// printSides: 양면인쇄 옵션 제공 여부 / numbering: 넘버링 옵션 제공 여부 / onlyOptions: 이 코드만 사용 가능한 옵션 목록(제한이 없으면 생략)
-const CATEGORIES = [
-  { code: "cat01", name: "빠른명함", tagline: "당일 제작", icon: Zap, iconBg: "#EDEAFD", iconFg: "#6C4CF0", note: null, printSides: true, numbering: true },
-  { code: "cat02", name: "프리미엄명함", tagline: "고급 수입지", icon: Crown, iconBg: "#FDF0DC", iconFg: "#DB9E1E", note: null, printSides: true, numbering: true },
-  { code: "cat03", name: "스페셜명함", tagline: "유포 · 벨벳 · 펄", icon: Gem, iconBg: "#E5F7EC", iconFg: "#22B573", note: null, printSides: true, numbering: true },
-  { code: "cat04", name: "카드명함", tagline: "PVC · 투명", icon: CreditCard, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "귀도리 옵션만 가능", printSides: true, numbering: true, onlyOptions: ["OPT002"] },
-  { code: "cat05", name: "에폭시명함", tagline: "에폭시 코팅", icon: Star, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "넘버링·양면 불가", printSides: false, numbering: false },
-  { code: "cat06", name: "박명함", tagline: "금박 · 은박", icon: Award, iconBg: "#FCE8EE", iconFg: "#E63A6B", note: "넘버링·양면 불가", printSides: false, numbering: false },
-];
-
-// ==================== domain/company/emailVerification ====================
-// ====================================================================
-// Domain : Company / Email Verification
-// Responsibility : 회사 이메일 소유 여부를 실제로 증명하는 절차 (도메인 문자열
-//                  일치만으로는 증명이 안 됨 — 누구나 타이핑만으로 남의 회사
-//                  이메일을 입력할 수 있기 때문에, 그 메일함에 실제로 접근
-//                  권한이 있는지 인증코드로 확인합니다).
-//
-// 아래 세 값은 전부 실제로 확인된 값입니다(2026-07-29): SERVICE_ID는 orderNotification.js
-// 와 같은 계정, TEMPLATE_ID는 "One-Time Password" 템플릿(변수: to_email/verification_code
-// 확인됨), PUBLIC_KEY도 EmailJS 대시보드에서 직접 확인. 이제 자리표시자가 아닙니다.
-// ====================================================================
-const EMAILJS_SERVICE_ID = "service_c48f848";
-const EMAILJS_VERIFY_TEMPLATE_ID = "template_zbv0idi";
-const EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
-
-const CODE_LENGTH = 6;
-const CODE_VALID_MS = 5 * 60 * 1000; // 5분
-
-function generateVerificationCode() {
-  const min = 10 ** (CODE_LENGTH - 1);
-  const max = 10 ** CODE_LENGTH - 1;
-  return String(Math.floor(min + Math.random() * (max - min + 1)));
+// ==================== screens/Shipping ====================
+function ConfirmDialog({ title, message, cancelLabel, confirmLabel, onCancel, onConfirm }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(15,15,30,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20,
+    }}>
+      <div style={{
+        background: "var(--paper-white)", borderRadius: 16, padding: "22px 20px", maxWidth: 320, width: "100%",
+        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.6, marginBottom: 18, whiteSpace: "pre-line" }}>{message}</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onCancel} style={{
+            flex: 1, padding: "11px 0", borderRadius: 10, border: "1.5px solid var(--line)",
+            background: "var(--paper-white)", color: "var(--ink)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>{cancelLabel}</button>
+          <button onClick={onConfirm} style={{
+            flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
+            background: "var(--stamp)", color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-// EmailJS REST API로 직접 POST — SDK를 새로 설치하지 않아도 되도록 fetch만 사용합니다.
-// (getStyleSuggestion이 Anthropic API를 fetch로 직접 호출하는 것과 같은 방식)
-async function sendVerificationEmail(email, code) {
-  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_VERIFY_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY,
-      template_params: { to_email: email, verification_code: code },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`이메일 발송 실패 (${res.status})`);
-  }
-}
+function Shipping({ order, patch, go, back, freeShip }) {
+  const s = order.ship;
+  const setShip = (p) => patch({ ship: { ...s, ...p } });
+  const canNext = s.name && s.addr && s.phone;
+  const [confirmStep, setConfirmStep] = useState(0); // 0=없음, 1=1차 경고, 2=2차(AI 요금) 경고
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.shippingTitle} onBack={() => setConfirmStep(1)} step={5} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <Field label={TEXTS.shippingNameLabel}><input style={inputStyle} value={s.name} onChange={(e) => setShip({ name: e.target.value })} placeholder={TEXTS.namePlaceholder} /></Field>
+        <Field label={TEXTS.shippingAddrLabel}><input style={inputStyle} value={s.addr} onChange={(e) => setShip({ addr: e.target.value })} placeholder={TEXTS.shippingAddrPlaceholder} /></Field>
+        <Field label={TEXTS.shippingPhoneLabel}><input style={inputStyle} value={s.phone} onChange={(e) => setShip({ phone: e.target.value })} placeholder={TEXTS.phonePlaceholder} /></Field>
+        <Card style={{ background: "var(--paper-deep)", border: "none" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <Truck size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+              {TEXTS.shippingNote}
+              {order.memberType === "general" && (
+                <div style={{ marginTop: 6 }}><Stamp active={freeShip} tone={freeShip ? "gold" : "stamp"}>{freeShip ? TEXTS.shipFreeApplied : TEXTS.shipFeeApplied}</Stamp></div>
+              )}
+            </div>
+          </div>
+        </Card>
+      </div>
+      <div style={{ padding: "8px 18px 18px" }}>
+        <PrimaryButton disabled={!canNext} onClick={() => go("payment")}>{TEXTS.nextPayment}</PrimaryButton>
+        {!canNext && (
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
+            {TEXTS.missingFieldsHint}
+            {[!s.name && TEXTS.shippingNameLabel, !s.addr && TEXTS.shippingAddrLabel, !s.phone && TEXTS.shippingPhoneLabel].filter(Boolean).join(", ")}
+          </div>
+        )}
+      </div>
 
-// 사용자가 입력한 코드가 실제로 보낸 코드와 일치하고, 유효시간 안인지 확인.
-function checkVerificationCode(inputCode, sentCode, sentAt) {
-  if (!sentCode || !sentAt) return { ok: false, reason: "not_sent" };
-  if (Date.now() - sentAt > CODE_VALID_MS) return { ok: false, reason: "expired" };
-  if (inputCode !== sentCode) return { ok: false, reason: "mismatch" };
-  return { ok: true };
+      {confirmStep === 1 && (
+        <ConfirmDialog
+          title={TEXTS.backResetWarnTitle}
+          message={TEXTS.backResetWarnMessage}
+          cancelLabel={TEXTS.backResetCancel}
+          confirmLabel={TEXTS.backResetConfirm}
+          onCancel={() => setConfirmStep(0)}
+          onConfirm={() => setConfirmStep(2)}
+        />
+      )}
+      {confirmStep === 2 && (
+        <ConfirmDialog
+          title={TEXTS.backResetAiFeeWarnTitle}
+          message={TEXTS.backResetAiFeeWarnMessage}
+          cancelLabel={TEXTS.backResetCancel}
+          confirmLabel={TEXTS.backResetConfirm}
+          onCancel={() => setConfirmStep(0)}
+          onConfirm={() => { setConfirmStep(0); back(); }}
+        />
+      )}
+    </div>
+  );
 }
 
 // ==================== domain/company/companyResolver ====================
@@ -2923,6 +3152,57 @@ function verifyCompanyEmail(email, company) {
   const domain = email.split("@")[1]?.toLowerCase().trim();
   if (!domain || isPersonalEmailDomain(domain)) return false; // 개인 이메일 도메인은 여기서도 한 번 더 막습니다(시드 데이터 실수 대비 이중 방어)
   return company.emailDomains.includes(domain);
+}
+
+// ==================== domain/company/emailVerification ====================
+// ====================================================================
+// Domain : Company / Email Verification
+// Responsibility : 회사 이메일 소유 여부를 실제로 증명하는 절차 (도메인 문자열
+//                  일치만으로는 증명이 안 됨 — 누구나 타이핑만으로 남의 회사
+//                  이메일을 입력할 수 있기 때문에, 그 메일함에 실제로 접근
+//                  권한이 있는지 인증코드로 확인합니다).
+//
+// 아래 세 값은 전부 실제로 확인된 값입니다(2026-07-29): SERVICE_ID는 orderNotification.js
+// 와 같은 계정, TEMPLATE_ID는 "One-Time Password" 템플릿(변수: to_email/verification_code
+// 확인됨), PUBLIC_KEY도 EmailJS 대시보드에서 직접 확인. 이제 자리표시자가 아닙니다.
+// ====================================================================
+const EMAILJS_SERVICE_ID = "service_c48f848";
+const EMAILJS_VERIFY_TEMPLATE_ID = "template_zbv0idi";
+const EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+
+const CODE_LENGTH = 6;
+const CODE_VALID_MS = 5 * 60 * 1000; // 5분
+
+function generateVerificationCode() {
+  const min = 10 ** (CODE_LENGTH - 1);
+  const max = 10 ** CODE_LENGTH - 1;
+  return String(Math.floor(min + Math.random() * (max - min + 1)));
+}
+
+// EmailJS REST API로 직접 POST — SDK를 새로 설치하지 않아도 되도록 fetch만 사용합니다.
+// (getStyleSuggestion이 Anthropic API를 fetch로 직접 호출하는 것과 같은 방식)
+async function sendVerificationEmail(email, code) {
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_VERIFY_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      template_params: { to_email: email, verification_code: code },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`이메일 발송 실패 (${res.status})`);
+  }
+}
+
+// 사용자가 입력한 코드가 실제로 보낸 코드와 일치하고, 유효시간 안인지 확인.
+function checkVerificationCode(inputCode, sentCode, sentAt) {
+  if (!sentCode || !sentAt) return { ok: false, reason: "not_sent" };
+  if (Date.now() - sentAt > CODE_VALID_MS) return { ok: false, reason: "expired" };
+  if (inputCode !== sentCode) return { ok: false, reason: "mismatch" };
+  return { ok: true };
 }
 
 // ==================== screens/Admin ====================
@@ -3325,144 +3605,6 @@ function RegisterForm({ onSubmit }) {
   );
 }
 
-// ==================== screens/Complete ====================
-const ORDER_STAGES = [
-  { k: "주문접수", icon: Check },
-  { k: "입금대기", icon: Landmark },
-  { k: "입금확인", icon: Check },
-  { k: "인쇄중", icon: Printer },
-  { k: "인쇄완료", icon: Package },
-  { k: "배송", icon: Truck },
-];
-
-function Complete({ order, go, grandTotal, category }) {
-  const orderNo = order.orderNo || "-";
-  const [stage, setStage] = useState(0);
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.completeTitle} step={7} />
-      <div style={{ padding: "10px 18px 16px" }}>
-        <Card style={{ textAlign: "center", padding: "22px 16px", marginBottom: 14 }}>
-          <div style={{
-            width: 54, height: 54, borderRadius: "50%", background: "var(--stamp)", color: "#fff",
-            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px",
-            transform: "rotate(-6deg)",
-          }}>
-            <Check size={26} />
-          </div>
-          <div className="serif" style={{ fontSize: 16, fontWeight: 900 }}>{TEXTS.completeHeadline}</div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.orderNoLabel} {orderNo}</div>
-          <div style={{ fontSize: 18, fontWeight: 900, color: "var(--stamp)", marginTop: 10 }}>{won(grandTotal)}</div>
-        </Card>
-
-        {order.fileStorageNotice && (
-          <div style={{
-            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-            borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
-          }}>
-            {order.fileStorageNotice}
-          </div>
-        )}
-
-        <Card style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 14 }}>{TEXTS.orderStatusTitle}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", position: "relative" }}>
-            <div style={{ position: "absolute", top: 15, left: 20, right: 20, height: 1.5, background: "var(--line)" }} />
-            <div style={{ position: "absolute", top: 15, left: 20, height: 1.5, background: "var(--stamp)", width: `${(stage / (ORDER_STAGES.length - 1)) * 100}%`, maxWidth: "calc(100% - 40px)" }} />
-            {ORDER_STAGES.map((s, i) => {
-              const Icon = s.icon;
-              const active = i <= stage;
-              return (
-                <div key={s.k} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1, flex: 1 }}>
-                  <div style={{
-                    width: 30, height: 30, borderRadius: "50%", background: active ? "var(--stamp)" : "var(--paper-white)",
-                    border: `1.5px solid ${active ? "var(--stamp)" : "var(--line)"}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <Icon size={14} color={active ? "#fff" : "var(--ink-soft)"} />
-                  </div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: active ? "var(--ink)" : "var(--ink-soft)" }}>{s.k}</div>
-                </div>
-              );
-            })}
-          </div>
-          {stage < ORDER_STAGES.length - 1 && (
-            <button onClick={() => setStage((s) => Math.min(ORDER_STAGES.length - 1, s + 1))} style={{ ...stepperBtn, width: "100%", marginTop: 16, fontSize: 11.5, fontWeight: 700 }}>
-              {TEXTS.orderStatusPreviewBtn}
-            </button>
-          )}
-        </Card>
-
-        <Card>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{TEXTS.orderDetailsTitle}</div>
-          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
-          <SummaryRow k={TEXTS.orderNoLabel} v={orderNo} />
-        </Card>
-      </div>
-      <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <PrimaryButton onClick={() => go("home")}>{TEXTS.goHomeBtn}</PrimaryButton>
-        <button
-          onClick={() => go("inquiry")}
-          style={{
-            width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
-            borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit",
-          }}
-        >
-          {TEXTS.inquiryBtn}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== data/papers ====================
-const PAPERS = [
-  // 2026-08-02: "빠른스노우250g는 옵션을 받으면 안 된다"는 요청 반영 — 익일출고를
-  // 위해 인쇄방식(단면/양면)만 고를 수 있고, 귀도리·타공·오시·미싱·넘버링 같은
-  // 시간이 걸리는 옵션은 아예 못 고르게 막습니다(data/options.js의 availableOptions
-  // 참고). 옵션이 필요하면 pa002(스노우지250g, "빠른" 없음)로 안내합니다.
-  { code: "pa001", cat: "cat01", name: "빠른스노우250g", sheets: 500, base: 4620, general: 14000, special: 5590, desc: "당일제작가능", restrictedOptions: true },
-  { code: "pa002", cat: "cat01", name: "스노우지250g", sheets: 500, base: 4620, general: 14000, special: 5590, choice: "무광코팅,코팅없음", desc: "코팅없음은 넘버링가능(450매,기준가40,000원)" },
-  { code: "pa003", cat: "cat01", name: "스노우지300g", sheets: 200, base: 4620, general: 14000, special: 5590, choice: "무광코팅,유광코팅", desc: "고급스러운 광택 옵션 선택 가능", numbering: false },
-  { code: "pa004", cat: "cat02", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 박이나 에폭시가 잘 어울림" },
-  { code: "pa005", cat: "cat02", name: "반누보화이트204g", sheets: 200, base: 6050, general: 15000, special: 7321, desc: "부드럽고 따뜻한 질감의 고급지. 잉크가 은은하게 표현됨" },
-  { code: "pa006", cat: "cat02", name: "반누보스노우화이트227g", sheets: 200, base: 7050, general: 17000, special: 8531, desc: "반누보보다 더 밝고 깨끗한 느낌. 고급스럽고 차분함" },
-  { code: "pa007", cat: "cat02", name: "반누보화이트320g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "반누보 특유의 질감 + 두꺼운 프리미엄 느낌" },
-  { code: "pa008", cat: "cat02", name: "아르미울트라화이트230g", sheets: 300, base: 4620, general: 15000, special: 5590, desc: "무난한 기본형 고급지. 다양한 업종에 적합" },
-  { code: "pa009", cat: "cat02", name: "아르미울트라화이트310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "은은한 펄(광택) 효과가 있는 특수지. 고급스럽고 화려함" },
-  { code: "pa010", cat: "cat02", name: "엑스트라매트백색350g", sheets: 200, base: 8800, general: 19000, special: 10648, desc: "섬유 느낌이 살아있는 독특한 질감. 감성적인 분위기" },
-  { code: "pa011", cat: "cat02", name: "랑데뷰내추럴310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "가장 인기 있는 프리미엄 고급지. 부드럽고 따뜻한 감성" },
-  { code: "pa017", cat: "cat02", name: "아쿠아사틴256g", sheets: 200, base: 17600, general: 35200, special: 21296, desc: "미세한 패턴 질감이 있는 유럽풍 고급지" },
-  { code: "pa018", cat: "cat02", name: "인버코트350g", sheets: 200, base: 18700, general: 37400, special: 22627, desc: "반짝이는 펄 효과. 조명에서 고급스럽게 빛남" },
-  { code: "pa020", cat: "cat02", name: "베이직백색233g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "매우 부드러운 촉감. 감성 브랜드·카페 스타일에 적합" },
-  { code: "pa021", cat: "cat02", name: "스타드림쿼츠240g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "골드 펄 느낌이 나는 화려한 특수지" },
-  { code: "pa022", cat: "cat02", name: "린넨커버솔라화이트216g", sheets: 200, base: 6050, general: 17000, special: 7321, desc: "매우 두꺼운 최고급지. 고급 브랜드용 추천" },
-  { code: "pa024", cat: "cat02", name: "크리스탈펄화이트235g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "검정색 특수지. 금박/은박과 조합 시 매우 고급스러움" },
-  { code: "pa025", cat: "cat02", name: "매쉬멜로우화이트209g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "물에 강한 합성지. 찢어짐과 습기에 강함" },
-  { code: "pa026", cat: "cat02", name: "다이니티골드펄250g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "친환경 크라프트 느낌. 자연주의·수제 감성", numbering: false },
-  { code: "pa027", cat: "cat02", name: "에그쉘엑스트라화이트400g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "벨벳처럼 부드러운 촉감. 최고급 감성 명함" },
-  { code: "pa028", cat: "cat03", name: "매트블랙380g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "매우 두꺼운 합지 스타일. 존재감 강함", numbering: false },
-  { code: "pa029", cat: "cat03", name: "유포지FEB250", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "푸른빛 펄 효과의 화려한 특수지", numbering: false },
-  { code: "pa030", cat: "cat03", name: "뉴크라프트보드300g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "단단하고 깔끔한 초고급 백색지" },
-  { code: "pa031", cat: "cat03", name: "벨벳화이트359g", sheets: 200, base: 9900, general: 20000, special: 11979, desc: "은은한 골드톤 특수지. 고급스러운 분위기 강조", numbering: false },
-  { code: "pa032", cat: "cat03", name: "듀오화이트400g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "물에 젖지않는 고급스러움" },
-  { code: "pa033", cat: "cat03", name: "블루펄스타250g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "느껴지는 독특한 텍스추어" },
-  { code: "pa035", cat: "cat03", name: "키칼라아이스골드250g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "최상의 멋스러움" },
-  { code: "pa036", cat: "cat03", name: "아트지백색300g", sheets: 200, base: 8800, general: 20000, special: 10648, desc: "매끄럽고 인쇄 발색이 선명한 아트지", numbering: false },
-  { code: "pa037", cat: "cat04", name: "PET투명300", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa038", cat: "cat04", name: "Luxury카드명함화이트", sheets: 200, base: 12100, general: 24200, special: 14641, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa039", cat: "cat04", name: "Luxury카드명함실버", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa040", cat: "cat04", name: "Luxury카드명함골드", sheets: 200, base: 23100, general: 46200, special: 27951, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa041", cat: "cat05", name: "아르미울트라화이트230g", sheets: 300, base: 11000, general: 22000, special: 13310, desc: "무난한 기본형 고급지" },
-  { code: "pa043", cat: "cat05", name: "아쿠아사틴256g", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "미세한 패턴 질감의 유럽풍 고급지" },
-  { code: "pa045", cat: "cat05", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 에폭시가 잘 어울림" },
-  { code: "pa047", cat: "cat05", name: "반누보화이트204g", sheets: 200, base: 10450, general: 20900, special: 12645, desc: "부드럽고 따뜻한 질감의 고급지" },
-  { code: "pa051", cat: "cat06", name: "아르미울트라화이트230g", sheets: 300, base: 12650, general: 25300, special: 15307, choice: "금박유광,금박무광,은박유광,은박무광", desc: "무난한 기본형 고급지" },
-  { code: "pa052", cat: "cat06", name: "아르미울트라화이트310g", sheets: 200, base: 13000, general: 26000, special: 15730, choice: "금박유광,금박무광,은박유광,은박무광", desc: "은은한 펄 효과. 고급스럽고 화려함" },
-  { code: "pa055", cat: "cat06", name: "스노우지백색300g무광코팅", sheets: 200, base: 15620, general: 31240, special: 18900, choice: "금박유광,금박무광,은박유광,은박무광", desc: "백색위에 박이 잘 어울림" },
-  { code: "pa056", cat: "cat06", name: "반누보화이트204g", sheets: 200, base: 11550, general: 23100, special: 13976, choice: "금박유광,금박무광,은박유광,은박무광", desc: "부드럽고 따뜻한 질감의 고급지" },
-];
-
 // ==================== renderer/CardLayoutPreview ====================
 // 2026-08-01: "포토샵처럼 줄이 맞는지 비교해달라"는 요청으로 추가한 정렬 가이드용
 // 상수. 드래그 중인 요소가 다른 요소와 같은 정렬 방식(왼쪽-왼쪽/오른쪽-오른쪽/
@@ -3745,6 +3887,15 @@ function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = t
             position: "absolute",
             left: `${safeXPct}%`, top: `${safeYPct}%`, right: `${safeXPct}%`, bottom: `${safeYPct}%`,
             border: compact ? "none" : "1px dashed rgba(108,76,240,0.35)",
+            // 2026-08-07(버그 수정): "사진을 눌러도 선택조차 잘 안 된다"는 신고 반영.
+            // 이 안전영역 박스는 점선 테두리만 그리는 용도인데(내용물은 없음), 실제
+            // DOM에서는 사진 요소보다 나중에(= 위에) 그려져서, 화면엔 안 보여도
+            // 이 사각형 범위 안의 터치를 전부 가로채고 있었습니다 — 그 안에 있는
+            // 사진(원형 프로필 등)을 누르면 이 투명한 박스가 먼저 이벤트를 가져가
+            // 버린 것입니다. pointerEvents:"none"으로 이 박스 자체는 클릭을
+            // 통과시키게 하고, 안의 텍스트·로고 요소들은 각자 pointerEvents:"auto"로
+            // 다시 켜서(아래) 원래대로 눌리게 했습니다.
+            pointerEvents: "none",
           }}
         >
           {/* 2026-08-01: Object.entries(layout) 대신 ALL_PATTERN_KINDS 고정 순서로 돕니다 —
@@ -3830,6 +3981,9 @@ function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = t
                         justifyContent: isLogo ? "center" : "flex-start",
                         gap: 4,
                         transition: "outline-color 0.15s",
+                        // 2026-08-07: 부모(safeAreaRef)가 pointerEvents:"none"이라
+                        // 여기서 다시 "auto"로 켜야 이 요소 자체는 예전처럼 눌립니다.
+                        pointerEvents: "auto",
                         ...(isSelectable
                           ? {
                               cursor: "grab", touchAction: "none", userSelect: "none",
@@ -3937,142 +4091,6 @@ function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = t
     </div>
   );
 }
-
-// ==================== domain/validation/index ====================
-// Validation Domain — Kernel이 "정의"한 규칙을 실제로 "판정"하는 곳.
-// (AI → Recommendation → Frame → Asset → Validation → Renderer)
-//
-// cpValidator / marginValidator / qrValidator는 기존에 Kernel에 있던 판정
-// 로직을 역할에 맞게 옮겨온 것이고, overlapValidator만 이번에 새로 만들었습니다
-// — "실제 책임이 생길 때 분리한다" 원칙대로, 없던 검사를 미리 만들지 않았습니다.
-
-// ==================== domain/asset/moodIntensity ====================
-// [Asset Domain: Catalog] ── Mood Intensity Table v1.0 ─────
-// "업종별로 배경의 존재감(강도)을 다르게 준다"는 원칙을 담은 표입니다.
-//
-// 정직하게 밝히는 것: 이 숫자들(10, 30, 35...)은 실제 명함 데이터를 분석해서 나온
-// 통계가 아닙니다 — 사장님이 업종별로 판단한 디자인 기준값입니다. DRS의 안전마진
-// (3mm)이나 최소 폰트 크기와 같은 종류입니다: 사람이 정한 설계값이지 측정값이
-// 아닙니다. 나중에 Learning Domain이 실사용 데이터를 충분히 모으면, 이 값들을
-// 실제 데이터 기반 값으로 검증하거나 대체할 수 있습니다 — 그 전까지는 이게
-// "합리적인 기본값" 역할을 합니다.
-//
-// intensity는 0~100 사이 값으로, "배경 이미지가 카드에서 얼마나 존재감 있게
-// 보여야 하는가"를 뜻합니다. 낮을수록 거의 흰 배경에 가깝고(신뢰감 우선),
-// 높을수록 배경이 분위기를 적극적으로 표현합니다(개성·정서 우선).
-//
-// industryDetector.js가 실제로 인식하는 9개 업종(INDUSTRY_KEYWORDS)에 맞춰
-// 만들었습니다 — "음식점", "꽃집"처럼 아직 인식 목록에 없는 업종은 넣지 않았습니다
-// (실제로 감지도 안 되는 업종에 값만 미리 만들어두는 건 "없는 걸 있는 것처럼"
-// 다루는 것과 비슷한 문제라서요). industryDetector.js에 새 업종이 추가되면 이
-// 표에도 같이 추가해야 합니다 — frameCodes.js의 INDUSTRY_PREFIXES와 같은 원칙.
-const MOOD_INTENSITY_BY_INDUSTRY = {
-  "보험": 10,
-  "의료": 10,
-  "법률": 8,
-  "부동산": 15,
-  "교육": 15,
-  "카페": 30,
-  "베이커리": 25,
-  "미용업": 35,
-  "스튜디오": 30,
-};
-const MOOD_INTENSITY_DEFAULT = 15; // 업종 미감지 시 — 부동산/교육과 같은 중간값으로 보수적으로 시작
-
-function getMoodIntensity(industry) {
-  return MOOD_INTENSITY_BY_INDUSTRY[industry] ?? MOOD_INTENSITY_DEFAULT;
-}
-
-// ==================== domain/generative/backgroundEngine ====================
-// ====================================================================
-// Domain : Generative / Background Engine
-// Version : 0.1 (뼈대만 — 실제 이미지 생성 API 없이는 완성될 수 없음)
-// Responsibility : 업종·스타일 태그·색상·분위기 강도를 받아 배경 이미지 생성
-//                  프롬프트를 조립하고, 결과를 업종 단위로 캐싱합니다.
-// 2026-08-04: 캐시 저장을 shared:true → shared:false로 바꿨습니다 — 이 캐시는 다른
-// 사용자와 공유될 이유가 딱히 없었고(업종별 캐시라 공유되면 오히려 다른 회사
-// 결과가 섞여 보일 수 있었음), Claude 아티팩트의 "공유 데이터 접근" 권한 팝업이
-// 뜨는 원인 중 하나였습니다. 개인 저장(shared:false)으로도 캐싱 목적은 그대로
-// 달성되고, 팝업도 안 뜹니다.
-//
-// 정직하게 밝히는 한계: callImageGenerationApi()는 실제로 이미지를 생성하지
-// 않습니다. 이 프로젝트에는 텍스트 완성(getStyleSuggestion)과 비전 분석
-// (extractLogoFromPhoto) API 호출은 있지만, 이미지를 생성하는 API 호출은
-// 아직 하나도 없습니다 — Claude API 자체가 이미지를 생성하지 않고, DALL-E나
-// Stable Diffusion, Imagen 같은 별도 서비스와 API 키가 필요합니다. 그 키는
-// 사장님이 해당 서비스에 가입해서 직접 발급받아야 하는 값이라 여기서 대신
-// 채워둘 수 없습니다. 아래 함수는 그 키가 준비됐을 때 내부 구현만 바꾸면
-// 나머지(프롬프트 조립·캐싱·호출 시점)는 전부 그대로 쓸 수 있도록 만든
-// 자리입니다 — 지금 호출하면 항상 { available: false }를 반환합니다.
-// ====================================================================
-
-// 업종+태그+색상 → 실제 이미지 생성 서비스에 보낼 프롬프트 문자열.
-// intensity(강도)는 숫자를 그대로 프롬프트에 노출하기보다("15% 존재감을 그려줘"는
-// 이미지 생성 모델이 이해하기 어려운 지시라서), "은은하게/적당히/뚜렷하게" 같은
-// 정성적 표현으로 변환해서 넣습니다.
-function intensityToDescriptor(intensity) {
-  if (intensity <= 12) return "매우 은은하고 거의 안 보일 정도로 절제된";
-  if (intensity <= 22) return "은은한";
-  if (intensity <= 32) return "적당히 느껴지는";
-  return "뚜렷하고 분위기가 살아있는";
-}
-
-function buildBackgroundPrompt(industry, styleTags = [], colorLabel = null) {
-  const intensity = getMoodIntensity(industry);
-  const descriptor = intensityToDescriptor(intensity);
-  const tagsPart = styleTags.length ? styleTags.join(", ") : "전문적이고 신뢰감 있는";
-  const colorPart = colorLabel ? `주요 색상은 ${colorLabel} 계열로,` : "";
-  return `명함 배경 이미지를 만들어줘. 업종은 "${industry || "일반"}"이고, ${colorPart} ${descriptor} 정도의 텍스처/일러스트를 써줘.
-분위기 키워드: ${tagsPart}.
-중요: 텍스트를 얹을 자리이므로 중앙과 하단 영역은 비교적 단순하게 비워두고, 명함 규격(90x50mm, 가로형)에 맞는 여백 있는 구성으로 만들어줘.
-장식이 과하지 않게, "특이하다"보다 "깔끔하고 전문적이다"는 인상을 우선해줘.`;
-}
-
-// 실제 이미지 생성 API 호출 자리. 지금은 항상 이용 불가로 답합니다 — 가짜 이미지나
-// 플레이스홀더 URL을 만들어 반환하지 않습니다(그렇게 하면 "작동하는 것처럼" 보이는
-// 화면을 만들게 되어, 오늘 계속 경계해온 "없는 걸 있는 것처럼" 문제가 됩니다).
-async function callImageGenerationApi(/* prompt, count */) {
-  return { available: false, images: [] };
-}
-
-// 업종+스타일 태그+색상 조합 단위로 캐싱합니다 — getStyleSuggestion과 같은 패턴
-// (같은 조합이면 여러 사용자가 재사용, API 호출·비용을 아낌). 캐시 키에 회사명이나
-// 개인정보는 포함하지 않습니다.
-async function generateBackgroundOptions(industry, styleTags = [], colorId = null) {
-  const cacheKey = `bg:${industry || "GEN"}:${[...styleTags].sort().join(",")}:${colorId || "any"}`;
-  try {
-    const cached = await window.storage.get(cacheKey, false);
-    if (cached?.value) return JSON.parse(cached.value);
-  } catch {
-    // 캐시에 없으면 아래에서 생성 시도로 이어짐
-  }
-
-  const prompt = buildBackgroundPrompt(industry, styleTags, colorId);
-  const result = await callImageGenerationApi(prompt, 4);
-  const response = { ...result, prompt, industry };
-
-  if (result.available) {
-    try {
-      await window.storage.set(cacheKey, JSON.stringify(response), false);
-    } catch {
-      // 저장 실패해도 이번 결과는 그대로 반환
-    }
-  }
-  return response;
-}
-
-// ==================== domain/learning/index ====================
-// Learning Domain — "기록만 남겨두는 배관(plumbing)". STEP 7 전체(통계, 승격/강등
-// 판단, changeReason 수집 UI)는 아직 만들지 않습니다 — 실사용 데이터가 없는 상태에서
-// 만들면 검증 안 된 걸 마치 학습된 것처럼 보여주는 셈이기 때문입니다(예전에 뺀 가짜
-// "★★★★★ 인기순위"와 같은 문제).
-//
-// Learning Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   Phase 1 [x] classifier.js  — Standard/Creative Exception/Invalid Exception 분류
-//   Phase 1 [x] recorder.js    — 기록 저장(KPR 초기 status만 부여, 승격·강등 로직 없음)
-//   Phase 2 [ ] statistics.js  — 업종별 %분포 등 실제 통계 계산 (실사용 데이터 쌓인 뒤)
-//   Phase 3 [ ] memory.js      — standardMemory/creativeExceptionMemory/invalidExceptionMemory
-//                                조회 API (지금은 recorder.js 안에서 저장 키만 씀, 별도 조회 기능 없음)
 
 // ==================== domain/company/logoExtraction ====================
 // ====================================================================
@@ -4210,6 +4228,142 @@ async function extractLogoFromPhoto(file) {
 //   Phase 2 [ ] recommendationRules.js   — "업종 X면 색상 Y" 같은 명시적 규칙표가 필요해지면
 //   Phase 3 [ ] recommendationScore.js   — 여러 후보를 동시에 점수 매겨 비교해야 할 때,
 //                                          또는 STEP 7 Learning이 붙어 통계 기반 점수가 생길 때
+
+// ==================== domain/learning/index ====================
+// Learning Domain — "기록만 남겨두는 배관(plumbing)". STEP 7 전체(통계, 승격/강등
+// 판단, changeReason 수집 UI)는 아직 만들지 않습니다 — 실사용 데이터가 없는 상태에서
+// 만들면 검증 안 된 걸 마치 학습된 것처럼 보여주는 셈이기 때문입니다(예전에 뺀 가짜
+// "★★★★★ 인기순위"와 같은 문제).
+//
+// Learning Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   Phase 1 [x] classifier.js  — Standard/Creative Exception/Invalid Exception 분류
+//   Phase 1 [x] recorder.js    — 기록 저장(KPR 초기 status만 부여, 승격·강등 로직 없음)
+//   Phase 2 [ ] statistics.js  — 업종별 %분포 등 실제 통계 계산 (실사용 데이터 쌓인 뒤)
+//   Phase 3 [ ] memory.js      — standardMemory/creativeExceptionMemory/invalidExceptionMemory
+//                                조회 API (지금은 recorder.js 안에서 저장 키만 씀, 별도 조회 기능 없음)
+
+// ==================== domain/asset/moodIntensity ====================
+// [Asset Domain: Catalog] ── Mood Intensity Table v1.0 ─────
+// "업종별로 배경의 존재감(강도)을 다르게 준다"는 원칙을 담은 표입니다.
+//
+// 정직하게 밝히는 것: 이 숫자들(10, 30, 35...)은 실제 명함 데이터를 분석해서 나온
+// 통계가 아닙니다 — 사장님이 업종별로 판단한 디자인 기준값입니다. DRS의 안전마진
+// (3mm)이나 최소 폰트 크기와 같은 종류입니다: 사람이 정한 설계값이지 측정값이
+// 아닙니다. 나중에 Learning Domain이 실사용 데이터를 충분히 모으면, 이 값들을
+// 실제 데이터 기반 값으로 검증하거나 대체할 수 있습니다 — 그 전까지는 이게
+// "합리적인 기본값" 역할을 합니다.
+//
+// intensity는 0~100 사이 값으로, "배경 이미지가 카드에서 얼마나 존재감 있게
+// 보여야 하는가"를 뜻합니다. 낮을수록 거의 흰 배경에 가깝고(신뢰감 우선),
+// 높을수록 배경이 분위기를 적극적으로 표현합니다(개성·정서 우선).
+//
+// industryDetector.js가 실제로 인식하는 9개 업종(INDUSTRY_KEYWORDS)에 맞춰
+// 만들었습니다 — "음식점", "꽃집"처럼 아직 인식 목록에 없는 업종은 넣지 않았습니다
+// (실제로 감지도 안 되는 업종에 값만 미리 만들어두는 건 "없는 걸 있는 것처럼"
+// 다루는 것과 비슷한 문제라서요). industryDetector.js에 새 업종이 추가되면 이
+// 표에도 같이 추가해야 합니다 — frameCodes.js의 INDUSTRY_PREFIXES와 같은 원칙.
+const MOOD_INTENSITY_BY_INDUSTRY = {
+  "보험": 10,
+  "의료": 10,
+  "법률": 8,
+  "부동산": 15,
+  "교육": 15,
+  "카페": 30,
+  "베이커리": 25,
+  "미용업": 35,
+  "스튜디오": 30,
+};
+const MOOD_INTENSITY_DEFAULT = 15; // 업종 미감지 시 — 부동산/교육과 같은 중간값으로 보수적으로 시작
+
+function getMoodIntensity(industry) {
+  return MOOD_INTENSITY_BY_INDUSTRY[industry] ?? MOOD_INTENSITY_DEFAULT;
+}
+
+// ==================== domain/generative/backgroundEngine ====================
+// ====================================================================
+// Domain : Generative / Background Engine
+// Version : 0.1 (뼈대만 — 실제 이미지 생성 API 없이는 완성될 수 없음)
+// Responsibility : 업종·스타일 태그·색상·분위기 강도를 받아 배경 이미지 생성
+//                  프롬프트를 조립하고, 결과를 업종 단위로 캐싱합니다.
+// 2026-08-04: 캐시 저장을 shared:true → shared:false로 바꿨습니다 — 이 캐시는 다른
+// 사용자와 공유될 이유가 딱히 없었고(업종별 캐시라 공유되면 오히려 다른 회사
+// 결과가 섞여 보일 수 있었음), Claude 아티팩트의 "공유 데이터 접근" 권한 팝업이
+// 뜨는 원인 중 하나였습니다. 개인 저장(shared:false)으로도 캐싱 목적은 그대로
+// 달성되고, 팝업도 안 뜹니다.
+//
+// 정직하게 밝히는 한계: callImageGenerationApi()는 실제로 이미지를 생성하지
+// 않습니다. 이 프로젝트에는 텍스트 완성(getStyleSuggestion)과 비전 분석
+// (extractLogoFromPhoto) API 호출은 있지만, 이미지를 생성하는 API 호출은
+// 아직 하나도 없습니다 — Claude API 자체가 이미지를 생성하지 않고, DALL-E나
+// Stable Diffusion, Imagen 같은 별도 서비스와 API 키가 필요합니다. 그 키는
+// 사장님이 해당 서비스에 가입해서 직접 발급받아야 하는 값이라 여기서 대신
+// 채워둘 수 없습니다. 아래 함수는 그 키가 준비됐을 때 내부 구현만 바꾸면
+// 나머지(프롬프트 조립·캐싱·호출 시점)는 전부 그대로 쓸 수 있도록 만든
+// 자리입니다 — 지금 호출하면 항상 { available: false }를 반환합니다.
+// ====================================================================
+
+// 업종+태그+색상 → 실제 이미지 생성 서비스에 보낼 프롬프트 문자열.
+// intensity(강도)는 숫자를 그대로 프롬프트에 노출하기보다("15% 존재감을 그려줘"는
+// 이미지 생성 모델이 이해하기 어려운 지시라서), "은은하게/적당히/뚜렷하게" 같은
+// 정성적 표현으로 변환해서 넣습니다.
+function intensityToDescriptor(intensity) {
+  if (intensity <= 12) return "매우 은은하고 거의 안 보일 정도로 절제된";
+  if (intensity <= 22) return "은은한";
+  if (intensity <= 32) return "적당히 느껴지는";
+  return "뚜렷하고 분위기가 살아있는";
+}
+
+function buildBackgroundPrompt(industry, styleTags = [], colorLabel = null) {
+  const intensity = getMoodIntensity(industry);
+  const descriptor = intensityToDescriptor(intensity);
+  const tagsPart = styleTags.length ? styleTags.join(", ") : "전문적이고 신뢰감 있는";
+  const colorPart = colorLabel ? `주요 색상은 ${colorLabel} 계열로,` : "";
+  return `명함 배경 이미지를 만들어줘. 업종은 "${industry || "일반"}"이고, ${colorPart} ${descriptor} 정도의 텍스처/일러스트를 써줘.
+분위기 키워드: ${tagsPart}.
+중요: 텍스트를 얹을 자리이므로 중앙과 하단 영역은 비교적 단순하게 비워두고, 명함 규격(90x50mm, 가로형)에 맞는 여백 있는 구성으로 만들어줘.
+장식이 과하지 않게, "특이하다"보다 "깔끔하고 전문적이다"는 인상을 우선해줘.`;
+}
+
+// 실제 이미지 생성 API 호출 자리. 지금은 항상 이용 불가로 답합니다 — 가짜 이미지나
+// 플레이스홀더 URL을 만들어 반환하지 않습니다(그렇게 하면 "작동하는 것처럼" 보이는
+// 화면을 만들게 되어, 오늘 계속 경계해온 "없는 걸 있는 것처럼" 문제가 됩니다).
+async function callImageGenerationApi(/* prompt, count */) {
+  return { available: false, images: [] };
+}
+
+// 업종+스타일 태그+색상 조합 단위로 캐싱합니다 — getStyleSuggestion과 같은 패턴
+// (같은 조합이면 여러 사용자가 재사용, API 호출·비용을 아낌). 캐시 키에 회사명이나
+// 개인정보는 포함하지 않습니다.
+async function generateBackgroundOptions(industry, styleTags = [], colorId = null) {
+  const cacheKey = `bg:${industry || "GEN"}:${[...styleTags].sort().join(",")}:${colorId || "any"}`;
+  try {
+    const cached = await window.storage.get(cacheKey, false);
+    if (cached?.value) return JSON.parse(cached.value);
+  } catch {
+    // 캐시에 없으면 아래에서 생성 시도로 이어짐
+  }
+
+  const prompt = buildBackgroundPrompt(industry, styleTags, colorId);
+  const result = await callImageGenerationApi(prompt, 4);
+  const response = { ...result, prompt, industry };
+
+  if (result.available) {
+    try {
+      await window.storage.set(cacheKey, JSON.stringify(response), false);
+    } catch {
+      // 저장 실패해도 이번 결과는 그대로 반환
+    }
+  }
+  return response;
+}
+
+// ==================== domain/validation/index ====================
+// Validation Domain — Kernel이 "정의"한 규칙을 실제로 "판정"하는 곳.
+// (AI → Recommendation → Frame → Asset → Validation → Renderer)
+//
+// cpValidator / marginValidator / qrValidator는 기존에 Kernel에 있던 판정
+// 로직을 역할에 맞게 옮겨온 것이고, overlapValidator만 이번에 새로 만들었습니다
+// — "실제 책임이 생길 때 분리한다" 원칙대로, 없던 검사를 미리 만들지 않았습니다.
 
 // ==================== screens/Design ====================
 // Asset Domain(로고/색상/배경/스타일 태그 카탈로그)은 /domain/asset 로 분리됨 — "AI가 무엇을 고를 수 있는가"
@@ -6283,6 +6437,285 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
 
 // UploadBox, MAX_UPLOAD_MB: components/ui.js 로 이동 (Admin 화면에서도 공용으로 씀)
 
+// ==================== screens/Product ====================
+function PaperSelect({ order, patch, go, back, category, catPapers, paper }) {
+  // 2026-08-02: "코팅 옵션을 직접 골라야 다음으로 못 넘어간다"는 불편 반영 —
+  // 용지에 선택지(choice)가 있으면 "무광코팅"을 기본값으로 미리 골라둡니다.
+  // 대부분 무광코팅을 쓰시니, 안 바꾸고 그냥 "다음"을 눌러도 되게 했습니다.
+  // 물론 아래에서 언제든 다른 코팅으로 바꿀 수 있습니다.
+  const defaultChoiceFor = (p) => {
+    if (!p.choice) return null;
+    const choices = p.choice.split(",").map((c) => c.trim());
+    return choices.includes("무광코팅") ? "무광코팅" : choices[0];
+  };
+  const selectPaper = (p) => {
+    const changed = order.paperCode !== p.code; // 실제로 용지가 바뀌었을 때만 옵션 초기화
+    patch({
+      paperCode: p.code,
+      selOptions: changed ? defaultSelOptions(category, p) : order.selOptions,
+      paperChoice: changed ? defaultChoiceFor(p) : order.paperChoice,
+    });
+    if (!p.choice) go("options");
+  };
+  const selectChoice = (p, c) => {
+    const changed = order.paperCode !== p.code || order.paperChoice !== c;
+    patch({
+      paperCode: p.code,
+      selOptions: changed ? defaultSelOptions(category, p) : order.selOptions,
+      paperChoice: c,
+    });
+    go("options");
+  };
+  const canNext = order.paperCode && (!paper?.choice || order.paperChoice);
+  return (
+    <div className="app-body">
+      <TopBar title={`${category?.name || ""} · ${TEXTS.paperScreenTitleSuffix}`} sub={category?.note} onBack={back} step={1} go={go} />
+      <div style={{ padding: "6px 18px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {catPapers.map((p) => {
+          const choices = p.choice ? p.choice.split(",").map((c) => c.trim()) : [];
+          const isSelected = order.paperCode === p.code;
+          return (
+            <Card key={p.code} selected={isSelected} onClick={() => selectPaper(p)}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 3, lineHeight: 1.45 }}>{p.desc}</div>
+                </div>
+                <div style={{ textAlign: "right", minWidth: 84 }}>
+                  <div style={{ fontSize: 15, fontWeight: 900, color: "var(--stamp)" }}>{won(order.memberType === "special" ? p.special : p.general)}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{p.sheets}{TEXTS.sheetsBasisSuffix}</div>
+                </div>
+              </div>
+              {choices.length > 0 && (
+                <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--ink)", marginBottom: 6 }}>{TEXTS.paperChoiceLabel}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {choices.map((c) => {
+                      const chosen = isSelected && order.paperChoice === c;
+                      return (
+                        <button
+                          key={c}
+                          onClick={() => selectChoice(p, c)}
+                          style={{
+                            fontSize: 11.5, padding: "6px 10px", borderRadius: 999, cursor: "pointer",
+                            border: `1.4px solid ${chosen ? "var(--stamp)" : "var(--line)"}`,
+                            background: chosen ? "var(--stamp)" : "var(--paper-white)",
+                            color: chosen ? "#fff" : "var(--ink)",
+                            fontFamily: "inherit", fontWeight: 600,
+                          }}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+      <div style={{ padding: "4px 18px 18px" }}>
+        <PrimaryButton disabled={!canNext} onClick={() => go("options")}>{TEXTS.nextOptions}</PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+function OptionSelect({ order, patch, go, back, category, paper, catOptions, unit, optTotal, goodsTotal }) {
+  const printSideOption = catOptions.find((o) => o.code === "OPT001");
+  const otherOptions = catOptions.filter((o) => o.code !== "OPT001");
+  // 2026-08-01: "기본값이 단면이라 그냥 지나치는 사람이 많다"는 요청으로 추가.
+  // 디자인 화면으로 넘어가기 직전, 단면/양면 중 뭘 골랐는지 한 번 더 확인시킵니다 —
+  // 꼼꼼히 안 읽고 넘어가는 사람도 이 확인창은 멈춰서 보게 됩니다.
+  const [showPrintSideConfirm, setShowPrintSideConfirm] = useState(false);
+
+  const toggleSimple = (code) => {
+    const next = { ...order.selOptions };
+    if (next[code]) delete next[code]; else next[code] = { choice: null };
+    patch({ selOptions: next });
+  };
+  const setChoice = (o, value) => {
+    if (o.multi) {
+      const current = order.selOptions[o.code]?.choice;
+      const arr = Array.isArray(current) ? current : [];
+      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
+      patch({ selOptions: { ...order.selOptions, [o.code]: { choice: next } } });
+    } else {
+      patch({ selOptions: { ...order.selOptions, [o.code]: { choice: value } } });
+    }
+  };
+  const setPrintSide = (value) => {
+    patch({ selOptions: { ...order.selOptions, OPT001: { choice: value } } });
+  };
+
+  const canNext = !printSideOption || !!order.selOptions.OPT001?.choice;
+
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.optionScreenTitle} sub={`${category?.name} · ${paper?.name}`} onBack={back} step={2} go={go} />
+      <div style={{ padding: "6px 18px 4px" }}>
+        {category?.note && (
+          <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.categoryNotePrefix} <b style={{ color: "var(--ink)" }}>{category.note}</b> {TEXTS.categoryNoteSuffix}</div>
+          </Card>
+        )}
+        {/* 2026-08-02: "빠른스노우250g는 익일출고를 위해 옵션을 못 받게 해달라"는
+            요청 반영 — 인쇄방식(단면/양면)은 그대로 고를 수 있지만, 다른 옵션은
+            availableOptions()에서 이미 목록 자체가 안 뜨도록 걸러져 있습니다. 여기서는
+            "왜 옵션이 안 보이는지"를 고객에게 설명해줍니다. */}
+        {paper?.restrictedOptions && (
+          <div style={{
+            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+            borderRadius: 10, padding: "10px 12px", marginBottom: 12, lineHeight: 1.5,
+          }}>
+            {TEXTS.restrictedOptionsNotice}
+          </div>
+        )}
+
+        {printSideOption && (
+          <Card style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{printSideOption.name}</div>
+            <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+              {printSideOption.choice.map((c) => {
+                const sel = order.selOptions.OPT001?.choice === c.value;
+                return (
+                  <button
+                    key={c.value}
+                    onClick={() => setPrintSide(c.value)}
+                    style={{
+                      flex: 1, fontSize: 12.5, padding: "10px 8px", borderRadius: 10, cursor: "pointer",
+                      border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
+                      background: sel ? "var(--stamp)" : "var(--paper-white)",
+                      color: sel ? "#fff" : "var(--ink)",
+                      fontFamily: "inherit", fontWeight: 700,
+                    }}
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {otherOptions.length === 0 && !printSideOption && (
+          <div style={{ fontSize: 13, color: "var(--ink-soft)", padding: "10px 2px" }}>{TEXTS.noOptionsAvailable}</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {otherOptions.map((o) => {
+            const checked = !!order.selOptions[o.code];
+            const fee = optionFee(o, order.selOptions);
+            const feeLabel = fee > 0 ? `+${won(fee)}` : TEXTS.noExtraFee;
+            return (
+              <Card key={o.code} selected={checked} onClick={() => toggleSimple(o.code)}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{o.name}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: fee ? "var(--stamp)" : "var(--ink-soft)" }}>{feeLabel}</span>
+                    <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${checked ? "var(--stamp)" : "var(--line)"}`, background: checked ? "var(--stamp)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {checked && <Check size={13} color="#fff" />}
+                    </div>
+                  </div>
+                </div>
+                {checked && o.choice && (
+                  <>
+                    {o.multi && <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 8 }}>{TEXTS.multiChoiceHintPrefix}{o.choice.length}{TEXTS.multiChoiceHintSuffix}</div>}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                      {o.choice.map((c) => {
+                        const sel = o.multi
+                          ? (Array.isArray(order.selOptions[o.code]?.choice) && order.selOptions[o.code].choice.includes(c.value))
+                          : order.selOptions[o.code]?.choice === c.value;
+                        return (
+                          <button
+                            key={c.value}
+                            onClick={() => setChoice(o, c.value)}
+                            style={{
+                              fontSize: 11.5, padding: "6px 10px", borderRadius: 999, cursor: "pointer",
+                              border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
+                              background: sel ? "var(--stamp)" : "var(--paper-white)",
+                              color: sel ? "#fff" : "var(--ink)",
+                              fontFamily: "inherit", fontWeight: 600,
+                            }}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+        <Field label={TEXTS.setQuantityLabel(paper?.sheets)}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={() => patch({ sets: Math.max(1, order.sets - 1) })} style={stepperBtn}>−</button>
+            <div style={{ fontSize: 16, fontWeight: 700, minWidth: 28, textAlign: "center" }}>{order.sets}</div>
+            <button onClick={() => patch({ sets: order.sets + 1 })} style={stepperBtn}>+</button>
+          </div>
+          {paper?.sheets && order.sets > 1 && (
+            <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>
+              {TEXTS.setQuantityTotalSheets(order.sets, paper.sheets * order.sets)}
+            </div>
+          )}
+          {order.memberType === "general" && (
+            <div style={{ marginTop: 8 }}>
+              <Stamp active={order.sets >= 3} tone={order.sets >= 3 ? "gold" : "stamp"}>
+                {order.sets >= 3 ? TEXTS.freeShipReached : TEXTS.freeShipRemaining(3 - order.sets)}
+              </Stamp>
+            </div>
+          )}
+        </Field>
+        <Card style={{ background: "var(--paper-deep)", border: "none", marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-soft)" }}>
+            <span>{TEXTS.paperLineLabel(order.sets, won(unit))}</span><span>{won(unit * order.sets)}</span>
+          </div>
+          {optTotal > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4 }}>
+              <span>{TEXTS.optionLineLabel(order.sets, won(optTotal))}</span><span>{won(optTotal * order.sets)}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900, marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+            <span>{TEXTS.goodsTotalLabel}</span><span style={{ color: "var(--stamp)" }}>{won(goodsTotal)}</span>
+          </div>
+        </Card>
+      </div>
+      <div style={{ padding: "16px 18px 18px" }}>
+        <PrimaryButton
+          disabled={!canNext}
+          onClick={() => (printSideOption ? setShowPrintSideConfirm(true) : go(order.authed ? "design" : "auth"))}
+        >
+          {TEXTS.nextPrefix}{order.authed ? TEXTS.nextDesign : TEXTS.nextSignupLogin}
+        </PrimaryButton>
+        {!canNext && (
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
+            {TEXTS.missingFieldsHint}{printSideOption?.name}
+          </div>
+        )}
+      </div>
+      {showPrintSideConfirm && (
+        <ConfirmDialog
+          title={TEXTS.printSideConfirmTitle}
+          message={TEXTS.printSideConfirmMessage(printSideOption?.choice.find((c) => c.value === order.selOptions.OPT001?.choice)?.label || "")}
+          cancelLabel={TEXTS.printSideConfirmCancel}
+          confirmLabel={TEXTS.printSideConfirmProceed}
+          onCancel={() => setShowPrintSideConfirm(false)}
+          onConfirm={() => {
+            setShowPrintSideConfirm(false);
+            go(order.authed ? "design" : "auth");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// stepperBtn: components/ui.js 로 이동 (Home/Auth/Complete에서도 공용으로 씀)
+
 // ==================== screens/Home ====================
 function useCountdown(hour) {
   const [left, setLeft] = useState("00:00:00");
@@ -6553,512 +6986,91 @@ function OrderLookup({ order, patch, go }) {
   );
 }
 
-// ==================== screens/Inquiry ====================
-// 주문별 1:1 문의(수정요청) 스레드 저장.
-// 스타일 캐시와 달리 이건 개인 요청 내용이라 shared:false(본인만 보는 저장소)를 씁니다.
-// 실제 서비스에서는 고객·관리자가 서로 다른 사람이라 이렇게 하면 관리자가 못 보게 되므로,
-// 반드시 진짜 백엔드(고객 계정 ↔ 관리자 계정이 같은 스레드를 보는 구조)로 옮겨야 합니다.
-// 지금은 프로토타입이라 "관리자 답변"도 같은 사용자가 미리보기 버튼으로 흉내냅니다.
-async function loadInquiryThread(orderNo) {
-  try {
-    const res = await window.storage.get(`inquiry:${orderNo}`, false);
-    return res?.value ? JSON.parse(res.value) : [];
-  } catch {
-    return [];
-  }
-}
+// ==================== screens/Complete ====================
+const ORDER_STAGES = [
+  { k: "주문접수", icon: Check },
+  { k: "입금대기", icon: Landmark },
+  { k: "입금확인", icon: Check },
+  { k: "인쇄중", icon: Printer },
+  { k: "인쇄완료", icon: Package },
+  { k: "배송", icon: Truck },
+];
 
-async function saveInquiryThread(orderNo, messages) {
-  try {
-    await window.storage.set(`inquiry:${orderNo}`, JSON.stringify(messages), false);
-  } catch {
-    // 저장 실패해도 화면에는 이미 반영돼 있으므로 조용히 무시
-  }
-}
-
-function Inquiry({ order, go, back }) {
-  const orderNo = order.orderNo || "BC24110032"; // 실제 주문이 없을 때(데모 조회)는 예시 주문번호 사용
-  const [messages, setMessages] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef = React.useRef(null);
-
-  React.useEffect(() => {
-    let active = true;
-    loadInquiryThread(orderNo).then((msgs) => {
-      if (active) { setMessages(msgs); setLoaded(true); }
-    });
-    return () => { active = false; };
-  }, [orderNo]);
-
-  React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const appendMessage = async (sender, content) => {
-    const next = [...messages, { sender, text: content, at: Date.now() }];
-    setMessages(next);
-    await saveInquiryThread(orderNo, next);
-  };
-
-  const handleSend = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    setText("");
-    await appendMessage("customer", trimmed);
-    setSending(false);
-  };
-
-  const handlePreviewAdminReply = async () => {
-    await appendMessage("admin", TEXTS.inquiryDemoAdminReply);
-  };
-
-  return (
-    <div className="app-body" style={{ display: "flex", flexDirection: "column" }}>
-      <TopBar title={TEXTS.inquiryTitle} sub={`${TEXTS.inquiryOrderNoPrefix} ${orderNo}`} onBack={back} go={go} />
-
-      <div style={{ padding: "6px 18px 4px" }}>
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10 }}>{TEXTS.inquiryPrivacyNote}</div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {loaded && messages.length === 0 && (
-          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", padding: "24px 10px" }}>{TEXTS.inquiryEmpty}</div>
-        )}
-        {messages.map((m, i) => {
-          const isCustomer = m.sender === "customer";
-          return (
-            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCustomer ? "flex-end" : "flex-start" }}>
-              <div style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 3, padding: "0 4px" }}>
-                {isCustomer ? TEXTS.inquiryCustomerLabel : TEXTS.inquiryAdminLabel}
-              </div>
-              <div style={{
-                maxWidth: "78%", padding: "10px 13px", borderRadius: 14,
-                borderBottomRightRadius: isCustomer ? 4 : 14,
-                borderBottomLeftRadius: isCustomer ? 14 : 4,
-                background: isCustomer ? "var(--stamp)" : "var(--paper-white)",
-                color: isCustomer ? "#fff" : "var(--ink)",
-                border: isCustomer ? "none" : "1.5px solid var(--line)",
-                fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
-              }}>
-                {m.text}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-
-      <div style={{ padding: "12px 18px 6px" }}>
-        <div style={{ fontSize: 10, color: "var(--ink-soft)", textAlign: "center", marginBottom: 6 }}>{TEXTS.inquiryPreviewNote}</div>
-        <button
-          onClick={handlePreviewAdminReply}
-          style={{
-            width: "100%", background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
-            borderRadius: 10, fontSize: 12, fontWeight: 700, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
-          }}
-        >
-          {TEXTS.inquiryPreviewReplyBtn}
-        </button>
-      </div>
-
-      <div style={{ padding: "0 18px 18px", display: "flex", gap: 8 }}>
-        <input
-          style={{ ...inputStyle, flex: 1 }}
-          placeholder={TEXTS.inquiryPlaceholder}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!text.trim() || sending}
-          style={{
-            width: 64, borderRadius: 10, border: "none",
-            background: text.trim() ? "var(--stamp)" : "var(--line)",
-            color: text.trim() ? "#fff" : "var(--ink-soft)",
-            fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", fontFamily: "inherit",
-          }}
-        >
-          {TEXTS.inquirySendBtn}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== domain/company/supabaseAuth ====================
-// ====================================================================
-// Domain : Company / Supabase Auth
-// Responsibility : 진짜 전화번호 인증(가입 1회) + 비밀번호 로그인.
-//
-// 왜 @supabase/supabase-js 대신 fetch를 직접 쓰는가: 이 미리보기 환경(Claude
-// 아티팩트)에서 쓸 수 있는 라이브러리 목록에 supabase-js가 없습니다. 다행히
-// Supabase Auth(GoTrue)는 그냥 REST API라서, EmailJS 연동 때와 똑같은 방식
-// (raw fetch)으로 그대로 호출할 수 있습니다 — SDK가 하는 일이 결국 이 REST
-// 호출을 감싸는 것뿐이라, 기능상 차이는 없습니다.
-//
-// ⚠️ 설정 필요: 아래 두 값을 실제 프로젝트 값으로 채워야 합니다.
-const SUPABASE_URL = "https://wzqgbiedddquaataybvw.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ZRboBtWv9S6LxToeORG-zA_oCmYLcjg";
-// "비밀 키"(sb_secret_...)는 여기에 절대 넣지 않습니다 — 이건 서버 전용이고,
-// 이 파일은 브라우저에서 돌아가는 화면 코드라 넣으면 그대로 노출됩니다.
-// ====================================================================
-
-async function authFetch(path, body) {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    // Supabase는 실패해도 보통 { error_description } 또는 { msg }로 이유를 줍니다.
-    throw new Error(data.error_description || data.msg || data.error || `요청 실패 (${res.status})`);
-  }
-  return data;
-}
-
-// 전화번호로 인증코드(SMS)를 보냅니다. 실제로 문자가 나가려면, Supabase 대시보드의
-// Authentication → Providers → Phone에서 문자발송 업체(SMS Provider, 예: Twilio,
-// 또는 Supabase가 지원하는 다른 업체)를 연결해둬야 합니다 — 이 코드만으로는
-// "인증 로직"만 되는 거고, 실제 문자 발송 업체 연결은 별도 설정입니다.
-async function sendPhoneOtp(phone) {
-  return authFetch("/otp", { phone });
-}
-
-// 사용자가 문자로 받은 코드를 입력하면, 그게 맞는지 Supabase에 확인합니다.
-// 성공하면 access_token(로그인 세션)을 돌려받습니다 — 이게 "이 사람이 진짜
-// 이 번호의 주인임을 증명했다"는 증표입니다.
-async function verifyPhoneOtp(phone, token) {
-  return authFetch("/verify", { type: "sms", phone, token });
-}
-
-// 전화 인증이 끝난 뒤, 그 계정에 비밀번호를 설정합니다(가입 시 1회).
-// access_token은 verifyPhoneOtp()가 돌려준 값을 그대로 씁니다.
-async function setPasswordAfterVerification(accessToken, password) {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ password }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error_description || data.msg || `비밀번호 설정 실패 (${res.status})`);
-  return data;
-}
-
-// 이후 로그인 — 문자 인증 없이, 전화번호+비밀번호만으로 확인합니다.
-async function signInWithPassword(phone, password) {
-  return authFetch("/token?grant_type=password", { phone, password });
-}
-
-// ==================== screens/Auth ====================
-// Supabase는 국제 표준 형식(+82...)을 요구합니다 — "010-1234-5678"처럼 한국식으로
-// 입력해도 자동으로 변환해줍니다.
-function toE164(krPhone) {
-  const digits = (krPhone || "").replace(/\D/g, "");
-  if (digits.startsWith("0")) return `+82${digits.slice(1)}`;
-  if (digits.startsWith("82")) return `+${digits}`;
-  return `+82${digits}`;
-}
-
-function Auth({ order, patch, go, back }) {
-  const [mode, setMode] = useState("login");
-  const [code, setCode] = useState("");
-  const [otpInput, setOtpInput] = useState("");
-  const [sendingOtp, setSendingOtp] = useState(false);
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
-  const [otpError, setOtpError] = useState("");
-  const [otpAccessToken, setOtpAccessToken] = useState(null);
-  const [loginPasswordInput, setLoginPasswordInput] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [loggingIn, setLoggingIn] = useState(false);
-
-  // 회원 종류를 안 고르면 왜 버튼이 안 눌리는지 알기 어려워서(실제로 이 문제로 막히는 경우가 있었음),
-  // 화면에 들어오면 일반회원을 기본값으로 미리 선택해둡니다. 특별회원이 필요하면 직접 눌러서 바꾸면 됩니다.
-  React.useEffect(() => {
-    if (!order.memberType) patch({ memberType: "general" });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const missingSignupSteps = [];
-  if (!order.memberType) missingSignupSteps.push(TEXTS.memberKindLabel);
-  if (!order.name) missingSignupSteps.push(TEXTS.nameLabel);
-  if (!order.phoneVerified) missingSignupSteps.push(TEXTS.verifiedStamp);
-  if (!order.password || order.password.length < 4) missingSignupSteps.push(TEXTS.passwordLabel);
-  if (order.memberType === "special" && !order.company) missingSignupSteps.push(TEXTS.companyLabel);
-  if (order.memberType === "special" && !order.bizDoc) missingSignupSteps.push(TEXTS.bizDocLabel);
-  const canSubmitSignup = missingSignupSteps.length === 0;
+function Complete({ order, go, grandTotal, category }) {
+  const orderNo = order.orderNo || "-";
+  const [stage, setStage] = useState(0);
   return (
     <div className="app-body">
-      <TopBar title={TEXTS.authTitle} onBack={back} step={3} go={go} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {["login", "signup"].map((m) => (
-            <button key={m} onClick={() => setMode(m)} style={{
-              flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-              border: `1.5px solid ${mode === m ? "var(--stamp)" : "var(--line)"}`,
-              background: mode === m ? "var(--stamp)" : "var(--paper-white)",
-              color: mode === m ? "#fff" : "var(--ink)",
-            }}>
-              {m === "signup" ? TEXTS.tabSignup : TEXTS.tabLogin}
-            </button>
-          ))}
-        </div>
-
-        {mode === "signup" && (
-          <>
-            <Field label={TEXTS.memberKindLabel}>
-              <div style={{ display: "flex", gap: 10 }}>
-                {[
-                  { k: "general", label: TEXTS.memberKindGeneralLabel, d: TEXTS.memberKindGeneralDesc },
-                  { k: "special", label: TEXTS.memberKindSpecialLabel, d: TEXTS.memberKindSpecialDesc },
-                ].map((m) => (
-                  <div key={m.k} onClick={() => patch({ memberType: m.k })} style={{
-                    flex: 1, cursor: "pointer", borderRadius: 12, padding: "12px 12px",
-                    border: `1.5px solid ${order.memberType === m.k ? "var(--stamp)" : "var(--line)"}`,
-                    background: order.memberType === m.k ? "rgba(108,76,240,0.06)" : "var(--paper-white)",
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{m.label}</div>
-                    <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3, lineHeight: 1.4 }}>{m.d}</div>
-                  </div>
-                ))}
-              </div>
-            </Field>
-            {/* 2026-08-02: "특별회원 가입을 누르면 AI디자인이 안 되고 인쇄파일
-                업로드만 가능하다는 안내가 필요하다"는 요청 반영 — 기본값은 일반회원
-                그대로 두고(위 useEffect), 특별회원을 직접 고른 경우에만 뜹니다. */}
-            {order.memberType === "special" && (
-              <div style={{
-                fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-                borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
-              }}>
-                {TEXTS.specialMemberNotice}
-              </div>
-            )}
-            <Field label={TEXTS.nameLabel}><input style={inputStyle} placeholder={TEXTS.namePlaceholder} value={order.name} onChange={(e) => patch({ name: e.target.value })} /></Field>
-            <Field label={TEXTS.phoneLabel}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input style={{ ...inputStyle, flex: 1 }} placeholder={TEXTS.phonePlaceholder} value={order.phone} onChange={(e) => patch({ phone: e.target.value, phoneVerified: false })} />
-                <button
-                  style={{ ...stepperBtn, width: 80, fontSize: 12, fontWeight: 700 }}
-                  disabled={!order.phone || sendingOtp}
-                  onClick={async () => {
-                    setSendingOtp(true);
-                    setOtpError("");
-                    try {
-                      await sendPhoneOtp(toE164(order.phone));
-                      setCode("sent"); // 실제 코드는 사용자 휴대폰으로만 가고 여기선 모릅니다 — Supabase가 검증을 대신 해줍니다.
-                    } catch (err) {
-                      setOtpError(err.message);
-                    } finally {
-                      setSendingOtp(false);
-                    }
-                  }}
-                >
-                  {sendingOtp ? TEXTS.verifyRequestSending : TEXTS.verifyRequestBtn}
-                </button>
-              </div>
-              {otpError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 4 }}>{otpError}</div>}
-              {/* ⚠️ 미리보기 전용 임시 버튼 — 실제 배포 전에는 반드시 지워야 합니다.
-                  이 아티팩트 미리보기 환경이 외부 서버 호출(Supabase 등)을 막고 있어서
-                  실제 인증을 여기서는 확인할 수 없어, 나머지 화면(디자인·결제 등)을
-                  계속 테스트할 수 있도록 건너뛰기만 열어둔 것입니다. 실제 웹사이트로
-                  배포되면 이 CSP 제한이 없어져서 진짜 인증이 정상 작동하니, 그때는
-                  이 버튼을 지워야 합니다 — 안 지우면 아무나 인증 없이 가입할 수 있게
-                  되는 진짜 보안 구멍이 됩니다. */}
-              {otpError && (
-                <button
-                  onClick={() => patch({ phoneVerified: true })}
-                  style={{
-                    marginTop: 6, width: "100%", background: "none", border: "1.4px dashed var(--ink-soft)",
-                    borderRadius: 10, padding: "8px 0", fontSize: 11, color: "var(--ink-soft)", cursor: "pointer", fontFamily: "inherit",
-                  }}
-                >
-                  {TEXTS.previewSkipVerifyBtn}
-                </button>
-              )}
-            </Field>
-            {code && !order.phoneVerified && (
-              <Field label={TEXTS.verifyCodeLabel}>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input style={{ ...inputStyle, flex: 1 }} placeholder={TEXTS.verifyCodePlaceholder} value={otpInput} onChange={(e) => setOtpInput(e.target.value)} />
-                  <button
-                    style={{ ...stepperBtn, width: 80, fontSize: 11 }}
-                    disabled={!otpInput || verifyingOtp}
-                    onClick={async () => {
-                      setVerifyingOtp(true);
-                      setOtpError("");
-                      try {
-                        const result = await verifyPhoneOtp(toE164(order.phone), otpInput);
-                        setOtpAccessToken(result.access_token || null);
-                        patch({ phoneVerified: true });
-                      } catch (err) {
-                        setOtpError(err.message);
-                      } finally {
-                        setVerifyingOtp(false);
-                      }
-                    }}
-                  >
-                    {verifyingOtp ? TEXTS.verifyChecking : TEXTS.verifyCheckBtn}
-                  </button>
-                </div>
-              </Field>
-            )}
-            {order.phoneVerified && <Stamp active>{TEXTS.verifiedStamp}</Stamp>}
-
-            {order.phoneVerified && (
-              <Field label={TEXTS.passwordLabel}>
-                <input
-                  type="password" style={inputStyle} placeholder={TEXTS.passwordPlaceholder}
-                  value={order.password} onChange={(e) => patch({ password: e.target.value })}
-                />
-                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.passwordHint}</div>
-              </Field>
-            )}
-
-            {order.memberType === "special" && (
-              <>
-                <div style={{ height: 8 }} />
-                <Field label={TEXTS.companyLabel}><input style={inputStyle} placeholder={TEXTS.companyPlaceholder} value={order.company} onChange={(e) => patch({ company: e.target.value })} /></Field>
-                <Field label={TEXTS.bizDocLabel}>
-                  <UploadBox
-                    label={TEXTS.bizDocUploadPrompt}
-                    icon={Upload}
-                    done={!!order.bizDoc}
-                    fileName={order.bizDocFile?.name}
-                    accept=".png,.jpg,.jpeg,.pdf"
-                    onFile={(f) => patch({ bizDoc: true, bizDocFile: f })}
-                  />
-                </Field>
-                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.bizDocUploadHint}</div>
-              </>
-            )}
-
-            <div style={{ marginTop: 10 }}>
-              {otpError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 8 }}>{otpError}</div>}
-              <PrimaryButton
-                disabled={!canSubmitSignup || sendingOtp}
-                onClick={async () => {
-                  // 비밀번호를 실제 Supabase 계정에 설정합니다 — 이게 돼야 다음부터
-                  // 문자인증 없이 비밀번호로 로그인할 수 있습니다.
-                  if (otpAccessToken) {
-                    try {
-                      await setPasswordAfterVerification(otpAccessToken, order.password);
-                    } catch (err) {
-                      setOtpError(err.message);
-                      return;
-                    }
-                  }
-                  if (order.memberType === "special") {
-                    // 특별회원(기업)은 사업자등록증 승인 전까지는 로그인 완료 상태(authed)로 만들지 않습니다.
-                    patch({ authed: false });
-                    go("pendingApproval");
-                  } else {
-                    patch({ authed: true });
-                    go("design");
-                  }
-                }}
-              >
-                {order.memberType === "special" ? TEXTS.signupSubmitSpecial : TEXTS.signupSubmitGeneral}
-              </PrimaryButton>
-              {!canSubmitSignup && (
-                <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
-                  {TEXTS.missingFieldsHint}{missingSignupSteps.join(", ")}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {mode === "login" && (
-          <>
-            {/* 로그인마다 문자인증을 다시 하면 보낼 때마다 비용이 들고, 실제 앱들도
-                이렇게 안 합니다 — 문자인증은 가입 시 "이 번호의 주인이 맞다"를 한 번만
-                증명하는 용도고, 그다음부터는 아이디(전화번호)+비밀번호로 로그인합니다. */}
-            <Field label={TEXTS.phoneLabel}><input style={inputStyle} placeholder={TEXTS.phonePlaceholder} value={order.phone} onChange={(e) => patch({ phone: e.target.value })} /></Field>
-            <Field label={TEXTS.passwordLabel}><input type="password" style={inputStyle} placeholder={TEXTS.passwordLoginPlaceholder} value={loginPasswordInput} onChange={(e) => setLoginPasswordInput(e.target.value)} /></Field>
-            {loginError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 8 }}>{loginError}</div>}
-            <PrimaryButton
-              disabled={!order.phone || !loginPasswordInput || loggingIn}
-              onClick={async () => {
-                setLoggingIn(true);
-                setLoginError("");
-                try {
-                  const result = await signInWithPassword(toE164(order.phone), loginPasswordInput);
-                  patch({
-                    authed: true, phoneVerified: true,
-                    memberType: order.memberType || "general", name: order.name || TEXTS.defaultMemberName,
-                  });
-                  go("design");
-                } catch (err) {
-                  // ⚠️ 미리보기 전용 폴백 — 실제 배포 전에는 반드시 지워야 합니다.
-                  // 이 아티팩트 미리보기 환경이 외부 서버 호출을 막고 있어서, 여기서는
-                  // 진짜 서버 응답을 못 받습니다. 대신 지금 이 세션에 남아있는
-                  // order.password와 직접 비교해서, 나머지 화면 테스트를 계속할 수
-                  // 있게만 열어둡니다 — 이건 진짜 인증이 아니라 세션 안에서만
-                  // 의미 있는 임시 비교라, 실제 배포 시엔 반드시 지워야 합니다.
-                  if (order.password && loginPasswordInput === order.password) {
-                    patch({ authed: true, memberType: order.memberType || "general", name: order.name || TEXTS.defaultMemberName });
-                    go("design");
-                  } else {
-                    setLoginError(err.message || TEXTS.loginPasswordError);
-                  }
-                } finally {
-                  setLoggingIn(false);
-                }
-              }}
-            >
-              {loggingIn ? TEXTS.loggingInLabel : TEXTS.loginSubmit}
-            </PrimaryButton>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PendingApproval({ order, patch, go, back }) {
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.pendingTitle} onBack={back} step={3} go={go} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <Card style={{ textAlign: "center", padding: "26px 16px" }}>
+      <TopBar title={TEXTS.completeTitle} step={7} />
+      <div style={{ padding: "10px 18px 16px" }}>
+        <Card style={{ textAlign: "center", padding: "22px 16px", marginBottom: 14 }}>
           <div style={{
-            width: 48, height: 48, borderRadius: "50%", background: "var(--paper-deep)",
-            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px",
+            width: 54, height: 54, borderRadius: "50%", background: "var(--stamp)", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px",
+            transform: "rotate(-6deg)",
           }}>
-            <Upload size={22} color="var(--stamp)" />
+            <Check size={26} />
           </div>
-          <div style={{ fontSize: 14.5, fontWeight: 800 }}>{TEXTS.pendingHeadline}</div>
-          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.6, whiteSpace: "pre-line" }}>
-            {TEXTS.pendingBody}
-          </div>
+          <div className="serif" style={{ fontSize: 16, fontWeight: 900 }}>{TEXTS.completeHeadline}</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.orderNoLabel} {orderNo}</div>
+          <div style={{ fontSize: 18, fontWeight: 900, color: "var(--stamp)", marginTop: 10 }}>{won(grandTotal)}</div>
         </Card>
 
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", textAlign: "center", marginTop: 14 }}>
-          {TEXTS.pendingPreviewNote}
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <PrimaryButton onClick={() => patch({ authed: true })} icon={Check}>
-            {TEXTS.pendingApproveBtn}
-          </PrimaryButton>
-        </div>
-
-        {order.authed && (
-          <div style={{ marginTop: 10 }}>
-            <PrimaryButton onClick={() => go("design")}>{TEXTS.pendingContinueBtn}</PrimaryButton>
+        {order.fileStorageNotice && (
+          <div style={{
+            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+            borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
+          }}>
+            {order.fileStorageNotice}
           </div>
         )}
+
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 14 }}>{TEXTS.orderStatusTitle}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", position: "relative" }}>
+            <div style={{ position: "absolute", top: 15, left: 20, right: 20, height: 1.5, background: "var(--line)" }} />
+            <div style={{ position: "absolute", top: 15, left: 20, height: 1.5, background: "var(--stamp)", width: `${(stage / (ORDER_STAGES.length - 1)) * 100}%`, maxWidth: "calc(100% - 40px)" }} />
+            {ORDER_STAGES.map((s, i) => {
+              const Icon = s.icon;
+              const active = i <= stage;
+              return (
+                <div key={s.k} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1, flex: 1 }}>
+                  <div style={{
+                    width: 30, height: 30, borderRadius: "50%", background: active ? "var(--stamp)" : "var(--paper-white)",
+                    border: `1.5px solid ${active ? "var(--stamp)" : "var(--line)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Icon size={14} color={active ? "#fff" : "var(--ink-soft)"} />
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: active ? "var(--ink)" : "var(--ink-soft)" }}>{s.k}</div>
+                </div>
+              );
+            })}
+          </div>
+          {stage < ORDER_STAGES.length - 1 && (
+            <button onClick={() => setStage((s) => Math.min(ORDER_STAGES.length - 1, s + 1))} style={{ ...stepperBtn, width: "100%", marginTop: 16, fontSize: 11.5, fontWeight: 700 }}>
+              {TEXTS.orderStatusPreviewBtn}
+            </button>
+          )}
+        </Card>
+
+        <Card>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{TEXTS.orderDetailsTitle}</div>
+          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
+          <SummaryRow k={TEXTS.orderNoLabel} v={orderNo} />
+        </Card>
+      </div>
+      <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <PrimaryButton onClick={() => go("home")}>{TEXTS.goHomeBtn}</PrimaryButton>
+        <button
+          onClick={() => go("inquiry")}
+          style={{
+            width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
+            borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit",
+          }}
+        >
+          {TEXTS.inquiryBtn}
+        </button>
       </div>
     </div>
   );
