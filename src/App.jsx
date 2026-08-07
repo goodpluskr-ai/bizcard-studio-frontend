@@ -513,6 +513,71 @@ const TEXTS = {
   inquiryDemoAdminReply: "확인했습니다. 반영해서 다시 안내드릴게요. (관리자 미리보기 답변)",
 };
 
+// ==================== data/options ====================
+// choice 항목은 { label, value } 형태입니다. 화면에는 label을 보여주고,
+// 저장·비교(가격 계산 등)에는 value(코드)를 사용해서 나중에 라벨 문구가 바뀌어도 로직이 깨지지 않게 했습니다.
+const OPTIONS = [
+  { code: "OPT001", name: "인쇄 방식", fee: 0, feeLabel: "추가금 없음", required: true, choice: [
+    { label: "단면명함", value: "single" }, { label: "양면명함", value: "double" },
+  ] },
+  { code: "OPT002", name: "귀도리(4mm)", fee: 2420, feeLabel: "+2,420원", multi: true, choice: [
+    { label: "좌상", value: "topLeft" }, { label: "좌하", value: "bottomLeft" }, { label: "우상", value: "topRight" }, { label: "우하", value: "bottomRight" },
+  ] },
+  { code: "OPT003", name: "타공(3mm)", fee: 3267, feeLabel: "+3,267원", choice: [
+    { label: "좌상", value: "topLeft" }, { label: "좌중", value: "midLeft" }, { label: "좌하", value: "bottomLeft" },
+    { label: "우상", value: "topRight" }, { label: "우중", value: "midRight" }, { label: "우하", value: "bottomRight" },
+  ] },
+  { code: "OPT004", name: "오시(1줄중앙)", fee: 6050, feeLabel: "+6,050원", choice: [
+    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
+  ] },
+  { code: "OPT005", name: "미싱(1줄 위치설정)", fee: 6050, feeLabel: "+6,050원", choice: [
+    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
+  ] },
+  { code: "OPT006", name: "넘버링", fee: 45980, feeLabel: "+45,980원", choice: null },
+];
+
+function availableOptions(category, paper) {
+  if (!category) return [];
+  let opts = OPTIONS;
+  if (category.onlyOptions) opts = opts.filter((o) => category.onlyOptions.includes(o.code));
+  if (category.printSides === false) opts = opts.filter((o) => o.code !== "OPT001");
+  if (category.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
+  if (paper && paper.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
+  // 2026-08-02: "빠른스노우250g는 익일출고를 위해 옵션을 못 받게 해달라. 다만
+  // 단면/양면(OPT001)은 그대로 고를 수 있어야 한다"는 요청 반영 — 이 용지만 인쇄
+  // 방식 외의 나머지 옵션(귀도리·타공·오시·미싱·넘버링)을 전부 제외합니다.
+  if (paper && paper.restrictedOptions) opts = opts.filter((o) => o.code === "OPT001");
+  return opts;
+}
+
+// 오시(OPT004)·미싱(OPT005)은 세로/가로 방향에 따라 기준가가 달라짐: 기준가 × 1.1 × 1.1
+// 세로 짧게: 5,000원 기준가 → 6,050원 / 가로 길게: 7,000원 기준가 → 8,470원
+function optionFee(o, selOptions) {
+  if (o.code === "OPT004" || o.code === "OPT005") {
+    const value = selOptions?.[o.code]?.choice;
+    const base = value === "horizontal" ? 7000 : 5000;
+    return Math.round(base * 1.1 * 1.1);
+  }
+  return o.fee;
+}
+
+// 용지 선택 시 기본으로 세팅할 옵션값 (인쇄 방식은 필수이므로 단면명함을 기본값으로 지정)
+function defaultSelOptions(category, paper) {
+  const opts = availableOptions(category, paper);
+  const hasPrintSide = opts.some((o) => o.code === "OPT001");
+  return hasPrintSide ? { OPT001: { choice: "single" } } : {};
+}
+
+// 옵션 + 선택값을 사람이 읽을 수 있는 문구로 변환 (예: "인쇄 방식(양면명함)", "귀도리(4mm)(좌상/우상)")
+function describeSelectedOption(o, sel) {
+  if (!o) return null;
+  if (!o.choice) return o.name;
+  const raw = sel?.choice;
+  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const labels = values.map((v) => o.choice.find((c) => c.value === v)?.label).filter(Boolean);
+  return labels.length ? `${o.name}(${labels.join("/")})` : o.name;
+}
+
 // ==================== components/ui ====================
 const STEPS = ["카테고리", "용지", "옵션", "회원", "디자인", "배송", "결제", "완료"];
 
@@ -739,614 +804,8 @@ function UploadBox({ label, icon: Icon, done, fileName, onFile, accept, capture 
   );
 }
 
-// ==================== screens/Inquiry ====================
-// 주문별 1:1 문의(수정요청) 스레드 저장.
-// 스타일 캐시와 달리 이건 개인 요청 내용이라 shared:false(본인만 보는 저장소)를 씁니다.
-// 실제 서비스에서는 고객·관리자가 서로 다른 사람이라 이렇게 하면 관리자가 못 보게 되므로,
-// 반드시 진짜 백엔드(고객 계정 ↔ 관리자 계정이 같은 스레드를 보는 구조)로 옮겨야 합니다.
-// 지금은 프로토타입이라 "관리자 답변"도 같은 사용자가 미리보기 버튼으로 흉내냅니다.
-async function loadInquiryThread(orderNo) {
-  try {
-    const res = await window.storage.get(`inquiry:${orderNo}`, false);
-    return res?.value ? JSON.parse(res.value) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveInquiryThread(orderNo, messages) {
-  try {
-    await window.storage.set(`inquiry:${orderNo}`, JSON.stringify(messages), false);
-  } catch {
-    // 저장 실패해도 화면에는 이미 반영돼 있으므로 조용히 무시
-  }
-}
-
-function Inquiry({ order, go, back }) {
-  const orderNo = order.orderNo || "BC24110032"; // 실제 주문이 없을 때(데모 조회)는 예시 주문번호 사용
-  const [messages, setMessages] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef = React.useRef(null);
-
-  React.useEffect(() => {
-    let active = true;
-    loadInquiryThread(orderNo).then((msgs) => {
-      if (active) { setMessages(msgs); setLoaded(true); }
-    });
-    return () => { active = false; };
-  }, [orderNo]);
-
-  React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const appendMessage = async (sender, content) => {
-    const next = [...messages, { sender, text: content, at: Date.now() }];
-    setMessages(next);
-    await saveInquiryThread(orderNo, next);
-  };
-
-  const handleSend = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    setText("");
-    await appendMessage("customer", trimmed);
-    setSending(false);
-  };
-
-  const handlePreviewAdminReply = async () => {
-    await appendMessage("admin", TEXTS.inquiryDemoAdminReply);
-  };
-
-  return (
-    <div className="app-body" style={{ display: "flex", flexDirection: "column" }}>
-      <TopBar title={TEXTS.inquiryTitle} sub={`${TEXTS.inquiryOrderNoPrefix} ${orderNo}`} onBack={back} go={go} />
-
-      <div style={{ padding: "6px 18px 4px" }}>
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10 }}>{TEXTS.inquiryPrivacyNote}</div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {loaded && messages.length === 0 && (
-          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", padding: "24px 10px" }}>{TEXTS.inquiryEmpty}</div>
-        )}
-        {messages.map((m, i) => {
-          const isCustomer = m.sender === "customer";
-          return (
-            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCustomer ? "flex-end" : "flex-start" }}>
-              <div style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 3, padding: "0 4px" }}>
-                {isCustomer ? TEXTS.inquiryCustomerLabel : TEXTS.inquiryAdminLabel}
-              </div>
-              <div style={{
-                maxWidth: "78%", padding: "10px 13px", borderRadius: 14,
-                borderBottomRightRadius: isCustomer ? 4 : 14,
-                borderBottomLeftRadius: isCustomer ? 14 : 4,
-                background: isCustomer ? "var(--stamp)" : "var(--paper-white)",
-                color: isCustomer ? "#fff" : "var(--ink)",
-                border: isCustomer ? "none" : "1.5px solid var(--line)",
-                fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
-              }}>
-                {m.text}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-
-      <div style={{ padding: "12px 18px 6px" }}>
-        <div style={{ fontSize: 10, color: "var(--ink-soft)", textAlign: "center", marginBottom: 6 }}>{TEXTS.inquiryPreviewNote}</div>
-        <button
-          onClick={handlePreviewAdminReply}
-          style={{
-            width: "100%", background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
-            borderRadius: 10, fontSize: 12, fontWeight: 700, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
-          }}
-        >
-          {TEXTS.inquiryPreviewReplyBtn}
-        </button>
-      </div>
-
-      <div style={{ padding: "0 18px 18px", display: "flex", gap: 8 }}>
-        <input
-          style={{ ...inputStyle, flex: 1 }}
-          placeholder={TEXTS.inquiryPlaceholder}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!text.trim() || sending}
-          style={{
-            width: 64, borderRadius: 10, border: "none",
-            background: text.trim() ? "var(--stamp)" : "var(--line)",
-            color: text.trim() ? "#fff" : "var(--ink-soft)",
-            fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", fontFamily: "inherit",
-          }}
-        >
-          {TEXTS.inquirySendBtn}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== domain/config/serverConfig ====================
-// 2026-08-04: 실제 백엔드 서버(Render)가 배포되면서 추가 — 이 주소 하나가 프론트엔드가
-// 부르는 모든 API 호출의 기준입니다. 서버를 다른 곳으로 옮기거나 도메인을 바꾸게 되면
-// 여기 한 곳만 고치면 됩니다.
-const RENDER_API_BASE = "https://bizcard-studio-server.onrender.com";
-
-// ==================== domain/company/orderAdmin ====================
-// Order Admin — 관리자가 "입금확인"을 실제로 할 수 있게 해주는 기능.
-// 2026-08-04 갱신: 실제 백엔드 서버(Render + Supabase)가 배포되면서, 이 파일이
-// window.storage(이 미리보기 환경 전용 임시 저장소) 대신 진짜 서버 API를 부르도록
-// 바뀌었습니다. 데이터는 이제 Supabase Postgres에 실제로 저장되고, 여러 사용자
-// 사이의 격리 문제(이전까지의 한계)도 해결됩니다.
-//
-// ⚠️ 아직 안 옮겨진 부분: 인쇄파일(SVG)은 여전히 서버로 전송되지 않습니다 —
-// Supabase Storage 연동은 다음 단계입니다. 지금은 주문 데이터(연락처·금액·설계도 등)만
-// 실제로 저장되고, 인쇄파일 자체는 예전처럼 이메일 첨부로만 전달됩니다.
-//
-// ⚠️ Complete.jsx(고객이 보는 주문완료 화면)는 여전히 이 실제 상태를 안 읽고 예전
-// 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 이 부분은 다음 단계로 남아있습니다.
-
-
-const ORDER_STATUS = {
-  WAITING: "입금대기",
-  CONFIRMED: "입금확인",
-};
-
-// 결제 화면에서 주문 접수 시 호출 — 서버(그리고 그 뒤의 Supabase)에 실제로 저장됩니다.
-// 클라이언트가 미리 만들어둔 orderNo(화면 표시·이메일 등에 이미 쓰이고 있음)를 그대로
-// 서버에 넘겨서, 고객이 보는 주문번호와 데이터베이스에 저장된 주문번호가 항상 같도록
-// 맞췄습니다. 실패해도 결제 자체를 막지 않도록 항상 try/catch(또는 .catch)로 감싸서 쓰세요.
-async function recordNewOrder(orderNo, record) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      orderNo,
-      customerPhone: record.customerPhone,
-      customerName: record.customerName,
-      categoryCode: record.categoryCode,
-      paperCode: record.paperCode,
-      paperChoice: record.paperChoice,
-      options: record.options,
-      sets: record.sets,
-      memberType: record.memberType,
-      amountTotal: record.amountTotal,
-      depositorName: record.depositorName,
-      shipping: record.shipping,
-      designRecipe: record.designRecipe,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `주문 저장 요청이 실패했습니다 (${res.status}).`);
-  }
-  return res.json();
-}
-
-// 고객이 "내 주문 조회"(재주문) 화면에서 호출 — 전화번호로 최근 주문을 찾습니다.
-// ⚠️ 지금은 categoryCode/customerName/memberType/orderNo/designRecipe까지만 서버에
-// 있고, 실제 인쇄파일(printFileSvg)이나 특별회원 업로드 파일은 아직 서버에 저장되지
-// 않습니다(Storage 연동 전) — 그래서 재주문 시 "저장된 파일 그대로"는 아직 안 되고,
-// design_recipe가 있는 경우에 한해 그 설계도로 다시 만드는 것만 가능합니다.
-async function lookupOrdersByPhone(phone) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders?phone=${encodeURIComponent(phone)}`);
-  if (!res.ok) throw new Error("주문 조회에 실패했습니다.");
-  const body = await res.json();
-  const orders = (body.orders || []).map((o) => ({
-    orderNo: o.order_no,
-    name: o.customer_name,
-    memberType: o.member_type,
-    categoryName: o.category_code,
-    designRecipe: o.design_recipe,
-    // 아래 두 개는 서버에 아직 없음(known gap) — undefined로 두면 화면의
-    // "재주문하기" 버튼 조건(printFileSvg || specialOrderFile || designRecipe)이
-    // designRecipe만으로도 그대로 동작합니다.
-    printFileSvg: undefined,
-    specialOrderFile: undefined,
-  }));
-  return orders[0] || null; // 가장 최근 것 하나만 씀(서버가 최신순으로 내려줌)
-}
-async function adminLogin(password) {
-  const res = await fetch(`${RENDER_API_BASE}/api/admin/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || "로그인에 실패했습니다.");
-  return body.token;
-}
-
-// 관리자 화면에서 호출 — 서버(Supabase)에 저장된 전체 주문 목록을 가져옵니다.
-async function listOrders(token) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/all`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error("주문 목록을 불러오지 못했습니다.");
-  const body = await res.json();
-  // 프론트엔드 화면 코드가 기대하는 필드 이름(camelCase, orderNo/depositor 등)에
-  // 맞춰서 서버 응답(snake_case)을 변환합니다.
-  return (body.orders || []).map((o) => ({
-    orderNo: o.order_no,
-    depositor: o.depositor_name,
-    categoryName: o.category_code,
-    grandTotal: o.amount_total,
-    status: o.status,
-    confirmedBy: o.confirmed_by,
-    confirmedAt: o.confirmed_at ? new Date(o.confirmed_at).getTime() : null,
-  }));
-}
-
-// 관리자가 "입금확인" 버튼을 눌렀을 때 호출 — 실제로 서버가 상태를 바꾸고 기록합니다.
-async function confirmDeposit(orderNo, token) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/${orderNo}/confirm-deposit`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "입금확인 처리에 실패했습니다.");
-  }
-  return res.json();
-}
-
-// ==================== data/categories ====================
-// printSides: 양면인쇄 옵션 제공 여부 / numbering: 넘버링 옵션 제공 여부 / onlyOptions: 이 코드만 사용 가능한 옵션 목록(제한이 없으면 생략)
-const CATEGORIES = [
-  { code: "cat01", name: "빠른명함", tagline: "당일 제작", icon: Zap, iconBg: "#EDEAFD", iconFg: "#6C4CF0", note: null, printSides: true, numbering: true },
-  { code: "cat02", name: "프리미엄명함", tagline: "고급 수입지", icon: Crown, iconBg: "#FDF0DC", iconFg: "#DB9E1E", note: null, printSides: true, numbering: true },
-  { code: "cat03", name: "스페셜명함", tagline: "유포 · 벨벳 · 펄", icon: Gem, iconBg: "#E5F7EC", iconFg: "#22B573", note: null, printSides: true, numbering: true },
-  { code: "cat04", name: "카드명함", tagline: "PVC · 투명", icon: CreditCard, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "귀도리 옵션만 가능", printSides: true, numbering: true, onlyOptions: ["OPT002"] },
-  { code: "cat05", name: "에폭시명함", tagline: "에폭시 코팅", icon: Star, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "넘버링·양면 불가", printSides: false, numbering: false },
-  { code: "cat06", name: "박명함", tagline: "금박 · 은박", icon: Award, iconBg: "#FCE8EE", iconFg: "#E63A6B", note: "넘버링·양면 불가", printSides: false, numbering: false },
-];
-
-// ==================== screens/Home ====================
-function useCountdown(hour) {
-  const [left, setLeft] = useState("00:00:00");
-  React.useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      const cutoff = new Date();
-      cutoff.setHours(hour, 0, 0, 0);
-      let diff = cutoff - now;
-      if (diff < 0) diff += 24 * 3600 * 1000;
-      const h = String(Math.floor(diff / 3600000)).padStart(2, "0");
-      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, "0");
-      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, "0");
-      setLeft(`${h}:${m}:${s}`);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [hour]);
-  return left.split(":");
-}
-
-function Home({ order, patch, go }) {
-  const [h, m, s] = useCountdown(18);
-  const catRef = React.useRef(null);
-
-  const openCategory = (code) => {
-    const changed = order.catCode !== code; // 실제로 카테고리가 바뀌었을 때만 하위 선택값 초기화
-    patch(changed
-      ? { catCode: code, paperCode: null, paperChoice: null, selOptions: {}, sets: 1 }
-      : { catCode: code });
-    go("paper");
-  };
-
-  return (
-    <div className="app-body">
-      <div style={{ padding: "20px 18px 4px", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <div style={{
-            width: 38, height: 38, borderRadius: 12, flexShrink: 0,
-            background: "linear-gradient(135deg, var(--stamp), var(--stamp-2))",
-            color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13,
-          }}>AI</div>
-          <div>
-            <div className="serif" style={{ fontSize: 18, lineHeight: 1.2 }}>{TEXTS.appName}</div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.appTagline}</div>
-          </div>
-        </div>
-        <button onClick={() => go("admin")} style={{
-          display: "flex", alignItems: "center", gap: 5, background: "var(--paper-white)",
-          border: "1px solid var(--line)", borderRadius: 999, padding: "7px 12px", fontSize: 11.5,
-          fontWeight: 600, color: "var(--ink-soft)", cursor: "pointer", fontFamily: "inherit",
-        }}>
-          <Settings size={13} /> {TEXTS.adminButton}
-        </button>
-      </div>
-
-      <div style={{ padding: "16px 18px 0" }}>
-        <div
-          onClick={() => openCategory("cat01")}
-          style={{
-            background: "linear-gradient(135deg, #6C4CF0, #4C6FFF)", borderRadius: 20, padding: "20px 20px 22px",
-            position: "relative", overflow: "hidden", cursor: "pointer",
-          }}
-        >
-          <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>{TEXTS.homeBannerLabel}</div>
-          <div style={{ fontSize: 19, fontWeight: 800, color: "#fff", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-            {TEXTS.homeBannerTitle} <Zap size={17} color="#FFD65C" fill="#FFD65C" />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            {[[TEXTS.timeUnitHour, h], [TEXTS.timeUnitMinute, m], [TEXTS.timeUnitSecond, s]].map(([label, val], i) => (
-              <React.Fragment key={label}>
-                <div style={{ background: "rgba(15,15,40,0.35)", borderRadius: 10, padding: "8px 12px", textAlign: "center", minWidth: 46 }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{val}</div>
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,0.75)", marginTop: 2 }}>{label}</div>
-                </div>
-                {i < 2 && <div style={{ color: "rgba(255,255,255,0.6)", fontWeight: 800, alignSelf: "center" }}>:</div>}
-              </React.Fragment>
-            ))}
-          </div>
-          <button style={{
-            marginTop: 16, background: "#fff", color: "var(--stamp)", border: "none", borderRadius: 999,
-            padding: "9px 16px", fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontFamily: "inherit",
-          }}>
-            {TEXTS.homeBannerCta} <ArrowLeft size={13} style={{ transform: "rotate(180deg)" }} />
-          </button>
-          <div style={{ position: "absolute", right: -6, top: 18, width: 96, height: 72 }}>
-            <div style={{ position: "absolute", right: 4, top: 16, width: 84, height: 52, borderRadius: 10, background: "#22346B", transform: "rotate(-8deg)" }} />
-            <div style={{
-              position: "absolute", right: 12, top: 0, width: 84, height: 52, borderRadius: 10, background: "#fff",
-              transform: "rotate(-8deg)", boxShadow: "0 8px 16px rgba(20,15,60,0.28)",
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 800, color: "#3B2FBF" }}>AI STUDIO</div>
-              <div style={{ fontSize: 6, color: "#9C99B5", marginTop: 1 }}>Business Card Design</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 18px 0" }}>
-        <Card onClick={() => go("lookup")} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-          <div style={{ width: 32, height: 32, borderRadius: 10, background: "#EDEAFD", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
-            <PackageSearch size={16} color="#6C4CF0" />
-          </div>
-          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{TEXTS.lookupCardTitle}</div>
-          <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2, lineHeight: 1.4, whiteSpace: "pre-line" }}>{TEXTS.lookupCardDesc}</div>
-        </Card>
-        <Card
-          onClick={() => go(order.authed ? "lookup" : "auth")}
-          style={{ background: order.authed ? "var(--paper-white)" : "#FEF6E0", border: "none", display: "flex", flexDirection: "column", justifyContent: "space-between" }}
-        >
-          <div style={{ width: 32, height: 32, borderRadius: 10, background: order.authed ? "#EDEAFD" : "#FDECC0", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
-            {order.authed ? <UserCircle2 size={16} color="#6C4CF0" /> : <Gift size={16} color="#DB9E1E" />}
-          </div>
-          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{order.authed ? TEXTS.memberWelcome(order.name) : TEXTS.memberCardTitleGuest}</div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
-            <div style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{order.authed ? (order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral) : TEXTS.guestSignupHint}</div>
-            {!order.authed && (
-              <span style={{ background: "#FFCE3D", color: "#5C3E00", fontSize: 10.5, fontWeight: 700, padding: "4px 9px", borderRadius: 999 }}>{TEXTS.loginBadge}</span>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      <div ref={catRef} style={{ padding: "22px 18px 6px" }}>
-        <div style={{ fontSize: 15, fontWeight: 800 }}>{TEXTS.categorySectionTitle}</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "8px 18px 20px" }}>
-        {CATEGORIES.map((c) => {
-          const Icon = c.icon;
-          return (
-            <Card key={c.code} onClick={() => openCategory(c.code)}>
-              <div style={{ width: 32, height: 32, borderRadius: 10, background: c.iconBg, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
-                <Icon size={16} color={c.iconFg} />
-              </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.name}</div>
-              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>{c.tagline}</div>
-            </Card>
-          );
-        })}
-      </div>
-
-      <BottomNav active="home" order={order} go={go} scrollToCategories={() => catRef.current?.scrollIntoView({ behavior: "smooth" })} />
-    </div>
-  );
-}
-
-function BottomNav({ active, order, go, scrollToCategories }) {
-  const items = [
-    { k: "home", label: TEXTS.navHome, icon: HomeIcon, onClick: () => go("home") },
-    { k: "order", label: TEXTS.navOrder, icon: ClipboardList, onClick: scrollToCategories || (() => go("home")) },
-    { k: "lookup", label: TEXTS.navHistory, icon: Package, onClick: () => go("lookup") },
-    { k: "auth", label: order.authed ? TEXTS.navMy : TEXTS.navLogin, icon: User, onClick: () => go(order.authed ? "lookup" : "auth") },
-  ];
-  return (
-    <div style={{
-      position: "sticky", bottom: 0, background: "var(--paper-white)", borderTop: "1px solid var(--line)",
-      display: "flex", padding: "10px 6px 12px",
-    }}>
-      {items.map((it) => {
-        const Icon = it.icon;
-        const isActive = it.k === active;
-        return (
-          <button key={it.k} onClick={it.onClick} style={{
-            flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-            background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
-            color: isActive ? "var(--stamp)" : "var(--ink-soft)",
-          }}>
-            <Icon size={19} />
-            <span style={{ fontSize: 10.5, fontWeight: 600 }}>{it.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function OrderLookup({ order, patch, go }) {
-  const [phone, setPhone] = useState("");
-  const [searched, setSearched] = useState(false);
-  const [found, setFound] = useState(null); // 조회된 실제 주문 기록 (없으면 null)
-  const [searching, setSearching] = useState(false);
-
-  const handleSearch = async () => {
-    if (!phone.trim()) return;
-    setSearching(true);
-    setSearched(false);
-    try {
-      // 2026-08-04: 실제 서버(Render+Supabase)로 옮겼습니다 — 이전엔 window.storage라
-      // 이 계정으로 테스트하는 동안만 보이던 것이, 이제 실제 데이터베이스 조회입니다.
-      // ⚠️ 아직 남은 한계: 인쇄파일(SVG)·특별회원 업로드 파일은 서버에 저장되지
-      // 않아서(다음 단계), design_recipe가 있는 주문만 "재주문"이 가능합니다.
-      setFound(await lookupOrdersByPhone(phone.trim()));
-    } catch {
-      setFound(null);
-    } finally {
-      setSearching(false);
-      setSearched(true);
-    }
-  };
-
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.lookupTitle} onBack={() => go("home")} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <Field label={TEXTS.lookupFieldLabel}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input style={{ ...inputStyle, flex: 1 }} placeholder={TEXTS.phonePlaceholder} value={phone} onChange={(e) => setPhone(e.target.value)} />
-            <button onClick={handleSearch} disabled={searching} style={{ ...stepperBtn, width: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Search size={16} />
-            </button>
-          </div>
-        </Field>
-
-        {searched && !found && (
-          <Card><div style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{TEXTS.lookupNotFound}</div></Card>
-        )}
-        {searched && found && (
-          <Card>
-            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.lookupRecentOrder}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{found.categoryName || TEXTS.lookupOrderItem}</div>
-                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>{found.name}님 · {found.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral}</div>
-                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.orderNoLabel}: {found.orderNo}</div>
-              </div>
-              <Badge label={TEXTS.lookupPrintingBadge} tone="purple" />
-            </div>
-            {(found.printFileSvg || found.specialOrderFile || found.designRecipe) && (
-              <button
-                onClick={() => {
-                  // 재주문 = 다시 디자인하는 게 아니라, 저장해둔 그 인쇄파일을 그대로
-                  // 다시 결제로 넘기는 것입니다 — 디자인 화면을 아예 건너뜁니다.
-                  patch({
-                    printFileSvg: found.printFileSvg || null,
-                    printFileName: `reorder-${found.orderNo}.svg`,
-                    specialOrderFile: found.specialOrderFile || null,
-                    designRecipe: found.designRecipe || null,
-                    memberType: found.memberType,
-                  });
-                  go("shipping");
-                }}
-                style={{
-                  width: "100%", marginTop: 12, background: "var(--stamp)", border: "none", color: "#fff",
-                  borderRadius: 10, fontSize: 13, fontWeight: 700, padding: "11px 0", cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                {TEXTS.reorderNowBtn}
-              </button>
-            )}
-            <button
-              onClick={() => go("inquiry")}
-              style={{
-                width: "100%", marginTop: 8, background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
-                borderRadius: 10, fontSize: 12.5, fontWeight: 700, padding: "10px 0", cursor: "pointer", fontFamily: "inherit",
-              }}
-            >
-              {TEXTS.inquiryBtn}
-            </button>
-          </Card>
-        )}
-      </div>
-      <div style={{ marginTop: "auto" }}>
-        <BottomNav active="lookup" order={order} go={go} />
-      </div>
-    </div>
-  );
-}
-
 // ==================== utils/format ====================
 const won = (n) => `${Math.round(n).toLocaleString("ko-KR")}원`;
-
-// ==================== data/options ====================
-// choice 항목은 { label, value } 형태입니다. 화면에는 label을 보여주고,
-// 저장·비교(가격 계산 등)에는 value(코드)를 사용해서 나중에 라벨 문구가 바뀌어도 로직이 깨지지 않게 했습니다.
-const OPTIONS = [
-  { code: "OPT001", name: "인쇄 방식", fee: 0, feeLabel: "추가금 없음", required: true, choice: [
-    { label: "단면명함", value: "single" }, { label: "양면명함", value: "double" },
-  ] },
-  { code: "OPT002", name: "귀도리(4mm)", fee: 2420, feeLabel: "+2,420원", multi: true, choice: [
-    { label: "좌상", value: "topLeft" }, { label: "좌하", value: "bottomLeft" }, { label: "우상", value: "topRight" }, { label: "우하", value: "bottomRight" },
-  ] },
-  { code: "OPT003", name: "타공(3mm)", fee: 3267, feeLabel: "+3,267원", choice: [
-    { label: "좌상", value: "topLeft" }, { label: "좌중", value: "midLeft" }, { label: "좌하", value: "bottomLeft" },
-    { label: "우상", value: "topRight" }, { label: "우중", value: "midRight" }, { label: "우하", value: "bottomRight" },
-  ] },
-  { code: "OPT004", name: "오시(1줄중앙)", fee: 6050, feeLabel: "+6,050원", choice: [
-    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
-  ] },
-  { code: "OPT005", name: "미싱(1줄 위치설정)", fee: 6050, feeLabel: "+6,050원", choice: [
-    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
-  ] },
-  { code: "OPT006", name: "넘버링", fee: 45980, feeLabel: "+45,980원", choice: null },
-];
-
-function availableOptions(category, paper) {
-  if (!category) return [];
-  let opts = OPTIONS;
-  if (category.onlyOptions) opts = opts.filter((o) => category.onlyOptions.includes(o.code));
-  if (category.printSides === false) opts = opts.filter((o) => o.code !== "OPT001");
-  if (category.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
-  if (paper && paper.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
-  // 2026-08-02: "빠른스노우250g는 익일출고를 위해 옵션을 못 받게 해달라. 다만
-  // 단면/양면(OPT001)은 그대로 고를 수 있어야 한다"는 요청 반영 — 이 용지만 인쇄
-  // 방식 외의 나머지 옵션(귀도리·타공·오시·미싱·넘버링)을 전부 제외합니다.
-  if (paper && paper.restrictedOptions) opts = opts.filter((o) => o.code === "OPT001");
-  return opts;
-}
-
-// 오시(OPT004)·미싱(OPT005)은 세로/가로 방향에 따라 기준가가 달라짐: 기준가 × 1.1 × 1.1
-// 세로 짧게: 5,000원 기준가 → 6,050원 / 가로 길게: 7,000원 기준가 → 8,470원
-function optionFee(o, selOptions) {
-  if (o.code === "OPT004" || o.code === "OPT005") {
-    const value = selOptions?.[o.code]?.choice;
-    const base = value === "horizontal" ? 7000 : 5000;
-    return Math.round(base * 1.1 * 1.1);
-  }
-  return o.fee;
-}
-
-// 용지 선택 시 기본으로 세팅할 옵션값 (인쇄 방식은 필수이므로 단면명함을 기본값으로 지정)
-function defaultSelOptions(category, paper) {
-  const opts = availableOptions(category, paper);
-  const hasPrintSide = opts.some((o) => o.code === "OPT001");
-  return hasPrintSide ? { OPT001: { choice: "single" } } : {};
-}
-
-// 옵션 + 선택값을 사람이 읽을 수 있는 문구로 변환 (예: "인쇄 방식(양면명함)", "귀도리(4mm)(좌상/우상)")
-function describeSelectedOption(o, sel) {
-  if (!o) return null;
-  if (!o.choice) return o.name;
-  const raw = sel?.choice;
-  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-  const labels = values.map((v) => o.choice.find((c) => c.value === v)?.label).filter(Boolean);
-  return labels.length ? `${o.name}(${labels.join("/")})` : o.name;
-}
 
 // ==================== screens/Shipping ====================
 function ConfirmDialog({ title, message, cancelLabel, confirmLabel, onCancel, onConfirm }) {
@@ -1713,225 +1172,224 @@ function OptionSelect({ order, patch, go, back, category, paper, catOptions, uni
 
 // stepperBtn: components/ui.js 로 이동 (Home/Auth/Complete에서도 공용으로 씀)
 
-// ==================== data/papers ====================
-const PAPERS = [
-  // 2026-08-02: "빠른스노우250g는 옵션을 받으면 안 된다"는 요청 반영 — 익일출고를
-  // 위해 인쇄방식(단면/양면)만 고를 수 있고, 귀도리·타공·오시·미싱·넘버링 같은
-  // 시간이 걸리는 옵션은 아예 못 고르게 막습니다(data/options.js의 availableOptions
-  // 참고). 옵션이 필요하면 pa002(스노우지250g, "빠른" 없음)로 안내합니다.
-  { code: "pa001", cat: "cat01", name: "빠른스노우250g", sheets: 500, base: 4620, general: 14000, special: 5590, desc: "당일제작가능", restrictedOptions: true },
-  { code: "pa002", cat: "cat01", name: "스노우지250g", sheets: 500, base: 4620, general: 14000, special: 5590, choice: "무광코팅,코팅없음", desc: "코팅없음은 넘버링가능(450매,기준가40,000원)" },
-  { code: "pa003", cat: "cat01", name: "스노우지300g", sheets: 200, base: 4620, general: 14000, special: 5590, choice: "무광코팅,유광코팅", desc: "고급스러운 광택 옵션 선택 가능", numbering: false },
-  { code: "pa004", cat: "cat02", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 박이나 에폭시가 잘 어울림" },
-  { code: "pa005", cat: "cat02", name: "반누보화이트204g", sheets: 200, base: 6050, general: 15000, special: 7321, desc: "부드럽고 따뜻한 질감의 고급지. 잉크가 은은하게 표현됨" },
-  { code: "pa006", cat: "cat02", name: "반누보스노우화이트227g", sheets: 200, base: 7050, general: 17000, special: 8531, desc: "반누보보다 더 밝고 깨끗한 느낌. 고급스럽고 차분함" },
-  { code: "pa007", cat: "cat02", name: "반누보화이트320g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "반누보 특유의 질감 + 두꺼운 프리미엄 느낌" },
-  { code: "pa008", cat: "cat02", name: "아르미울트라화이트230g", sheets: 300, base: 4620, general: 15000, special: 5590, desc: "무난한 기본형 고급지. 다양한 업종에 적합" },
-  { code: "pa009", cat: "cat02", name: "아르미울트라화이트310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "은은한 펄(광택) 효과가 있는 특수지. 고급스럽고 화려함" },
-  { code: "pa010", cat: "cat02", name: "엑스트라매트백색350g", sheets: 200, base: 8800, general: 19000, special: 10648, desc: "섬유 느낌이 살아있는 독특한 질감. 감성적인 분위기" },
-  { code: "pa011", cat: "cat02", name: "랑데뷰내추럴310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "가장 인기 있는 프리미엄 고급지. 부드럽고 따뜻한 감성" },
-  { code: "pa017", cat: "cat02", name: "아쿠아사틴256g", sheets: 200, base: 17600, general: 35200, special: 21296, desc: "미세한 패턴 질감이 있는 유럽풍 고급지" },
-  { code: "pa018", cat: "cat02", name: "인버코트350g", sheets: 200, base: 18700, general: 37400, special: 22627, desc: "반짝이는 펄 효과. 조명에서 고급스럽게 빛남" },
-  { code: "pa020", cat: "cat02", name: "베이직백색233g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "매우 부드러운 촉감. 감성 브랜드·카페 스타일에 적합" },
-  { code: "pa021", cat: "cat02", name: "스타드림쿼츠240g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "골드 펄 느낌이 나는 화려한 특수지" },
-  { code: "pa022", cat: "cat02", name: "린넨커버솔라화이트216g", sheets: 200, base: 6050, general: 17000, special: 7321, desc: "매우 두꺼운 최고급지. 고급 브랜드용 추천" },
-  { code: "pa024", cat: "cat02", name: "크리스탈펄화이트235g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "검정색 특수지. 금박/은박과 조합 시 매우 고급스러움" },
-  { code: "pa025", cat: "cat02", name: "매쉬멜로우화이트209g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "물에 강한 합성지. 찢어짐과 습기에 강함" },
-  { code: "pa026", cat: "cat02", name: "다이니티골드펄250g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "친환경 크라프트 느낌. 자연주의·수제 감성", numbering: false },
-  { code: "pa027", cat: "cat02", name: "에그쉘엑스트라화이트400g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "벨벳처럼 부드러운 촉감. 최고급 감성 명함" },
-  { code: "pa028", cat: "cat03", name: "매트블랙380g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "매우 두꺼운 합지 스타일. 존재감 강함", numbering: false },
-  { code: "pa029", cat: "cat03", name: "유포지FEB250", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "푸른빛 펄 효과의 화려한 특수지", numbering: false },
-  { code: "pa030", cat: "cat03", name: "뉴크라프트보드300g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "단단하고 깔끔한 초고급 백색지" },
-  { code: "pa031", cat: "cat03", name: "벨벳화이트359g", sheets: 200, base: 9900, general: 20000, special: 11979, desc: "은은한 골드톤 특수지. 고급스러운 분위기 강조", numbering: false },
-  { code: "pa032", cat: "cat03", name: "듀오화이트400g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "물에 젖지않는 고급스러움" },
-  { code: "pa033", cat: "cat03", name: "블루펄스타250g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "느껴지는 독특한 텍스추어" },
-  { code: "pa035", cat: "cat03", name: "키칼라아이스골드250g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "최상의 멋스러움" },
-  { code: "pa036", cat: "cat03", name: "아트지백색300g", sheets: 200, base: 8800, general: 20000, special: 10648, desc: "매끄럽고 인쇄 발색이 선명한 아트지", numbering: false },
-  { code: "pa037", cat: "cat04", name: "PET투명300", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa038", cat: "cat04", name: "Luxury카드명함화이트", sheets: 200, base: 12100, general: 24200, special: 14641, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa039", cat: "cat04", name: "Luxury카드명함실버", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa040", cat: "cat04", name: "Luxury카드명함골드", sheets: 200, base: 23100, general: 46200, special: 27951, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa041", cat: "cat05", name: "아르미울트라화이트230g", sheets: 300, base: 11000, general: 22000, special: 13310, desc: "무난한 기본형 고급지" },
-  { code: "pa043", cat: "cat05", name: "아쿠아사틴256g", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "미세한 패턴 질감의 유럽풍 고급지" },
-  { code: "pa045", cat: "cat05", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 에폭시가 잘 어울림" },
-  { code: "pa047", cat: "cat05", name: "반누보화이트204g", sheets: 200, base: 10450, general: 20900, special: 12645, desc: "부드럽고 따뜻한 질감의 고급지" },
-  { code: "pa051", cat: "cat06", name: "아르미울트라화이트230g", sheets: 300, base: 12650, general: 25300, special: 15307, choice: "금박유광,금박무광,은박유광,은박무광", desc: "무난한 기본형 고급지" },
-  { code: "pa052", cat: "cat06", name: "아르미울트라화이트310g", sheets: 200, base: 13000, general: 26000, special: 15730, choice: "금박유광,금박무광,은박유광,은박무광", desc: "은은한 펄 효과. 고급스럽고 화려함" },
-  { code: "pa055", cat: "cat06", name: "스노우지백색300g무광코팅", sheets: 200, base: 15620, general: 31240, special: 18900, choice: "금박유광,금박무광,은박유광,은박무광", desc: "백색위에 박이 잘 어울림" },
-  { code: "pa056", cat: "cat06", name: "반누보화이트204g", sheets: 200, base: 11550, general: 23100, special: 13976, choice: "금박유광,금박무광,은박유광,은박무광", desc: "부드럽고 따뜻한 질감의 고급지" },
-];
+// ==================== domain/config/serverConfig ====================
+// 2026-08-04: 실제 백엔드 서버(Render)가 배포되면서 추가 — 이 주소 하나가 프론트엔드가
+// 부르는 모든 API 호출의 기준입니다. 서버를 다른 곳으로 옮기거나 도메인을 바꾸게 되면
+// 여기 한 곳만 고치면 됩니다.
+const RENDER_API_BASE = "https://bizcard-studio-server.onrender.com";
 
-// ==================== domain/company/logoExtraction ====================
-// ====================================================================
-// Domain : Company / Logo Extraction
-// Responsibility : 명함·안내문·간판 사진 등 "로고가 일부만 포함된 사진"에서
-//                  로고 영역만 잘라내기.
+// ==================== domain/company/orderAdmin ====================
+// Order Admin — 관리자가 "입금확인"을 실제로 할 수 있게 해주는 기능.
+// 2026-08-04 갱신: 실제 백엔드 서버(Render + Supabase)가 배포되면서, 이 파일이
+// window.storage(이 미리보기 환경 전용 임시 저장소) 대신 진짜 서버 API를 부르도록
+// 바뀌었습니다. 데이터는 이제 Supabase Postgres에 실제로 저장되고, 여러 사용자
+// 사이의 격리 문제(이전까지의 한계)도 해결됩니다.
 //
-// 설계 방향(중요): 배경까지 완전히 투명하게 지우는 이미지 분할(segmentation)이
-// 아니라, "이 사진에서 로고가 대략 어디 있는지" 위치만 비전 모델에게 물어보고,
-// 그 사각형 영역만 Canvas로 자릅니다. 전용 컴퓨터 비전 엔진을 직접 만드는 것보다
-// 훨씬 간단하고, 이미 있는 비전 API(여기서는 Claude API의 이미지 입력)로 충분합니다.
-// 배경이 완전히 투명하지 않고 사각형으로만 잘리는 것은 의도된 한계입니다 —
-// 필요성이 실제로 확인되면 그때 배경 제거를 별도로 추가합니다.
-// ====================================================================
+// ⚠️ 아직 안 옮겨진 부분: 인쇄파일(SVG)은 여전히 서버로 전송되지 않습니다 —
+// Supabase Storage 연동은 다음 단계입니다. 지금은 주문 데이터(연락처·금액·설계도 등)만
+// 실제로 저장되고, 인쇄파일 자체는 예전처럼 이메일 첨부로만 전달됩니다.
+//
+// ⚠️ Complete.jsx(고객이 보는 주문완료 화면)는 여전히 이 실제 상태를 안 읽고 예전
+// 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 이 부분은 다음 단계로 남아있습니다.
 
-// 프롬프트를 한 곳에 모아둔 객체 — recommendationEngine.js와 같은 패턴입니다.
-// 아직 이거 하나뿐이라 별도 폴더(prompt/)로는 나누지 않았습니다.
-const LOGO_EXTRACTION_PROMPTS = {
-  extractLogo: `이 사진 안에 회사 로고가 보이면, 그 로고를 감싸는 사각형 영역을
-이미지 전체 크기에 대한 백분율(0~100)로 알려줘. 다른 설명 없이 아래 JSON 형식으로만 답변해:
-{"found": true, "x": 왼쪽 끝 %, "y": 위쪽 끝 %, "width": 너비 %, "height": 높이 %}
-로고를 찾지 못하면 {"found": false} 로만 답변해.`,
+
+const ORDER_STATUS = {
+  WAITING: "입금대기",
+  CONFIRMED: "입금확인",
 };
 
-function fileToBase64(file) {
+// 결제 화면에서 주문 접수 시 호출 — 서버(그리고 그 뒤의 Supabase)에 실제로 저장됩니다.
+// 클라이언트가 미리 만들어둔 orderNo(화면 표시·이메일 등에 이미 쓰이고 있음)를 그대로
+// 서버에 넘겨서, 고객이 보는 주문번호와 데이터베이스에 저장된 주문번호가 항상 같도록
+// 맞췄습니다. 실패해도 결제 자체를 막지 않도록 항상 try/catch(또는 .catch)로 감싸서 쓰세요.
+async function recordNewOrder(orderNo, record) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      orderNo,
+      customerPhone: record.customerPhone,
+      customerName: record.customerName,
+      categoryCode: record.categoryCode,
+      paperCode: record.paperCode,
+      paperChoice: record.paperChoice,
+      options: record.options,
+      sets: record.sets,
+      memberType: record.memberType,
+      amountTotal: record.amountTotal,
+      depositorName: record.depositorName,
+      shipping: record.shipping,
+      designRecipe: record.designRecipe,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `주문 저장 요청이 실패했습니다 (${res.status}).`);
+  }
+  return res.json();
+}
+
+// 고객이 "내 주문 조회"(재주문) 화면에서 호출 — 전화번호로 최근 주문을 찾습니다.
+// ⚠️ 지금은 categoryCode/customerName/memberType/orderNo/designRecipe까지만 서버에
+// 있고, 실제 인쇄파일(printFileSvg)이나 특별회원 업로드 파일은 아직 서버에 저장되지
+// 않습니다(Storage 연동 전) — 그래서 재주문 시 "저장된 파일 그대로"는 아직 안 되고,
+// design_recipe가 있는 경우에 한해 그 설계도로 다시 만드는 것만 가능합니다.
+async function lookupOrdersByPhone(phone) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders?phone=${encodeURIComponent(phone)}`);
+  if (!res.ok) throw new Error("주문 조회에 실패했습니다.");
+  const body = await res.json();
+  const orders = (body.orders || []).map((o) => ({
+    orderNo: o.order_no,
+    name: o.customer_name,
+    memberType: o.member_type,
+    categoryName: o.category_code,
+    designRecipe: o.design_recipe,
+    // 아래 두 개는 서버에 아직 없음(known gap) — undefined로 두면 화면의
+    // "재주문하기" 버튼 조건(printFileSvg || specialOrderFile || designRecipe)이
+    // designRecipe만으로도 그대로 동작합니다.
+    printFileSvg: undefined,
+    specialOrderFile: undefined,
+  }));
+  return orders[0] || null; // 가장 최근 것 하나만 씀(서버가 최신순으로 내려줌)
+}
+async function adminLogin(password) {
+  const res = await fetch(`${RENDER_API_BASE}/api/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "로그인에 실패했습니다.");
+  return body.token;
+}
+
+// 관리자 화면에서 호출 — 서버(Supabase)에 저장된 전체 주문 목록을 가져옵니다.
+async function listOrders(token) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/all`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("주문 목록을 불러오지 못했습니다.");
+  const body = await res.json();
+  // 프론트엔드 화면 코드가 기대하는 필드 이름(camelCase, orderNo/depositor 등)에
+  // 맞춰서 서버 응답(snake_case)을 변환합니다.
+  return (body.orders || []).map((o) => ({
+    orderNo: o.order_no,
+    depositor: o.depositor_name,
+    categoryName: o.category_code,
+    grandTotal: o.amount_total,
+    status: o.status,
+    confirmedBy: o.confirmed_by,
+    confirmedAt: o.confirmed_at ? new Date(o.confirmed_at).getTime() : null,
+  }));
+}
+
+// 관리자가 "입금확인" 버튼을 눌렀을 때 호출 — 실제로 서버가 상태를 바꾸고 기록합니다.
+async function confirmDeposit(orderNo, token) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/${orderNo}/confirm-deposit`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "입금확인 처리에 실패했습니다.");
+  }
+  return res.json();
+}
+
+// ==================== domain/company/orderNotification ====================
+// ====================================================================
+// Domain : Company / Order Notification
+// Responsibility : 새 주문이 들어오면 관리자(goodplus.kr@gmail.com)에게 이메일로
+//                  알려줍니다. emailVerification.js(회사 이메일 소유 확인)와는
+//                  완전히 다른 기능입니다 — 저건 사용자가 입력한 이메일 주소가
+//                  진짜 자기 것인지 확인하는 용도이고, 이건 사장님 본인에게
+//                  "주문이 들어왔다"를 알리는 용도입니다. 서로 다른 EmailJS 템플릿을
+//                  씁니다(변수가 다름: 이쪽은 {{name}}/{{message}}/{{order_id}}).
+//
+// 여기 SERVICE_ID/TEMPLATE_ID는 자리표시자가 아니라, 예전 세션에서 실제로 테스트
+// 발송까지 확인된 값입니다(2026-07-29, service_c48f848 / template_fgijlbe,
+// Gmail 수신 확인됨). 다만 "To Email"은 코드가 아니라 EmailJS 템플릿 자체 설정에
+// 고정되어 있어서(goodplus.kr@gmail.com), 여기서 template_params로 보내지 않습니다.
+// ====================================================================
+const ORDER_EMAILJS_SERVICE_ID = "service_c48f848";
+const EMAILJS_ORDER_TEMPLATE_ID = "template_fgijlbe";
+// PUBLIC_KEY도 emailVerification.js와 같은 EmailJS 계정 값으로 확인됐습니다.
+const ORDER_EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+
+// order 객체에서 사람이 읽기 좋은 주문 요약 텍스트를 만듭니다. 어떤 필드가 정확히
+// 있는지는 App.jsx의 order 상태 모양을 따릅니다 — 없는 필드는 조용히 건너뜁니다.
+function buildOrderSummary(order, extra = {}) {
+  const lines = [
+    extra.categoryName && `카테고리: ${extra.categoryName}`,
+    extra.paperName && `용지: ${extra.paperName}`,
+    order.sets && `수량: ${order.sets}세트`,
+    extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
+    extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
+    order.depositor && `입금자명: ${order.depositor}`,
+    order.ship?.name && `받는분: ${order.ship.name}`,
+    order.ship?.phone && `연락처: ${order.ship.phone}`,
+    order.ship?.addr && `주소: ${order.ship.addr}`,
+    // 뒷면을 "직접 설명하기"로 고른 경우, 정해진 템플릿 없이 담당자가 직접 만들어야
+    // 하므로 그 설명을 반드시 여기 남깁니다 — 첨부는 앞면 파일 하나만 가는 구조라서
+    // (아래 한계 참고), 참고 이미지를 올렸다면 그 사실도 같이 알려줍니다.
+    order.backCustomNote && `\n[뒷면 직접 요청]\n${order.backCustomTags?.length ? `희망 내용: ${order.backCustomTags.join(", ")}\n` : ""}${order.backCustomNote}`,
+    order.backCustomFile && `(뒷면 참고 이미지 첨부됨 — 파일명: ${order.backCustomFile.name}. 첨부 슬롯은 앞면 파일과 공유라 안 붙었을 수 있어요, 확인 필요)`,
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+// 파일을 base64로 바꿉니다 — 이메일 첨부와 window.storage 저장 둘 다 이 형태가 필요해서
+// 이름을 용도 하나에 묶지 않고 범용으로 둡니다.
+function fileToBase64DataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(",")[1]); // "data:...;base64," 접두어 제거
+    reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
-// 사진 안에서 로고가 있는 대략의 위치를 비전 모델에게 물어봅니다.
-// 반환값은 이미지 크기에 대한 상대 좌표(0~100, %)입니다 — 픽셀 좌표를 바로 받으면
-// 모델이 실제 표시 크기를 몰라 부정확해지기 쉬워서, 항상 %로 답하게 합니다.
-async function detectLogoRegion(file) {
-  const base64 = await fileToBase64(file);
-  const prompt = LOGO_EXTRACTION_PROMPTS.extractLogo;
+// window.storage는 텍스트 전용, 한 값당 5MB 제한입니다. base64로 바꾸면 원본보다
+// 커지므로(약 1.33배), 원본 기준 이 크기까지만 저장을 "시도"합니다. 저장은 의무가
+// 아니라 재주문 편의를 위한 정책일 뿐이라, 안 되면 강제로 방법을 찾지 않고 그냥
+// "용량이 커서 저장이 안 된다"고 안내하고 넘어갑니다.
+const MAX_STORABLE_FILE_BYTES = 3 * 1024 * 1024;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+// ⚠️ 설정 필요: EmailJS에서 첨부파일 발송은 유료 플랜에서만 됩니다(2026-07-30 기준
+// 공식 문서 확인). 그리고 템플릿의 Attachments 탭에 "Variable Attachment" 타입으로
+// 파라미터 이름(예: attachment)을 등록해둬야, 여기서 보내는 값이 실제로 첨부됩니다 —
+// 코드만으로는 안 되고 EmailJS 대시보드에서 템플릿 설정을 한 번 해주셔야 합니다.
+//
+// attachment는 File 객체(특별회원이 올린 파일)이거나, { dataUrl } 형태로 이미 계산된
+// base64(AI가 만든 인쇄용 SVG — 이미 텍스트라 File로 감쌀 필요 없이 바로 씀)일 수 있습니다.
+async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment = null) {
+  const message = buildOrderSummary(order, extra);
+  const templateParams = {
+    name: order.ship?.name || order.depositor || "고객",
+    message,
+    order_id: orderNo,
+  };
+  if (attachment) {
+    try {
+      templateParams.attachment = attachment.dataUrl ? attachment.dataUrl : await fileToBase64DataUrl(attachment);
+    } catch {
+      // 첨부 변환에 실패해도 주문 알림 이메일 자체는 보내야 하므로 무시하고 진행
+    }
+  }
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 200,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 } },
-          { type: "text", text: prompt },
-        ],
-      }],
+      service_id: ORDER_EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_ORDER_TEMPLATE_ID,
+      user_id: ORDER_EMAILJS_PUBLIC_KEY,
+      template_params: templateParams,
     }),
   });
-  if (!response.ok) throw new Error(`로고 위치 감지 실패 (${response.status})`);
-  const data = await response.json();
-  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(cleaned);
-  if (!parsed.found) return null;
-
-  // 값 방어: 모델이 범위를 벗어난 값을 줄 수 있으니 0~100 사이로 잘라줍니다.
-  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
-  return { x: clamp(parsed.x), y: clamp(parsed.y), width: clamp(parsed.width), height: clamp(parsed.height) };
+  if (!res.ok) {
+    throw new Error(`주문 알림 이메일 발송 실패 (${res.status})`);
+  }
 }
-
-// 원본 이미지에서 region(%) 영역만 Canvas로 잘라 새 이미지(Blob)를 만듭니다.
-function cropImageToRegion(file, region) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      try {
-        const sx = (region.x / 100) * img.naturalWidth;
-        const sy = (region.y / 100) * img.naturalHeight;
-        const sw = (region.width / 100) * img.naturalWidth;
-        const sh = (region.height / 100) * img.naturalHeight;
-        const canvas = document.createElement("canvas");
-        canvas.width = sw;
-        canvas.height = sh;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-        URL.revokeObjectURL(url);
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("자르기 실패"))), "image/png");
-      } catch (err) {
-        URL.revokeObjectURL(url);
-        reject(err);
-      }
-    };
-    img.onerror = () => reject(new Error("이미지 로드 실패"));
-    img.src = url;
-  });
-}
-
-// 잘라낸 로고가 너무 작으면(사진을 멀리서 찍은 경우 등) 명함에 쓰기엔 화질이
-// 부족할 수 있습니다. 정교한 블러 감지 대신, 가장 흔한 문제(해상도 부족)만 우선 확인합니다.
-const MIN_LOGO_DIMENSION = 200; // px — 이보다 작으면 명함 인쇄에 부적합할 가능성이 큼
-
-function checkImageQuality(file) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const ok = img.naturalWidth >= MIN_LOGO_DIMENSION && img.naturalHeight >= MIN_LOGO_DIMENSION;
-      resolve({ ok, width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({ ok: false, width: 0, height: 0 });
-    };
-    img.src = url;
-  });
-}
-
-// 전체 과정을 하나로 묶은 진입점. 로고를 못 찾으면 null을 반환합니다 —
-// 이 경우 호출한 쪽에서 "직접 잘라서 다시 올려주세요" 같은 안내로 이어가면 됩니다.
-async function extractLogoFromPhoto(file) {
-  const region = await detectLogoRegion(file);
-  if (!region) return null;
-  const blob = await cropImageToRegion(file, region);
-  return new File([blob], `logo_${Date.now()}.png`, { type: "image/png" });
-}
-
-// ==================== domain/learning/index ====================
-// Learning Domain — "기록만 남겨두는 배관(plumbing)". STEP 7 전체(통계, 승격/강등
-// 판단, changeReason 수집 UI)는 아직 만들지 않습니다 — 실사용 데이터가 없는 상태에서
-// 만들면 검증 안 된 걸 마치 학습된 것처럼 보여주는 셈이기 때문입니다(예전에 뺀 가짜
-// "★★★★★ 인기순위"와 같은 문제).
-//
-// Learning Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   Phase 1 [x] classifier.js  — Standard/Creative Exception/Invalid Exception 분류
-//   Phase 1 [x] recorder.js    — 기록 저장(KPR 초기 status만 부여, 승격·강등 로직 없음)
-//   Phase 2 [ ] statistics.js  — 업종별 %분포 등 실제 통계 계산 (실사용 데이터 쌓인 뒤)
-//   Phase 3 [ ] memory.js      — standardMemory/creativeExceptionMemory/invalidExceptionMemory
-//                                조회 API (지금은 recorder.js 안에서 저장 키만 씀, 별도 조회 기능 없음)
-
-// ==================== domain/recommendation/index ====================
-// Recommendation Domain — "AI가 어떻게 생각하는가". 재료(Asset)와 규칙(Kernel)을
-// 조합해서 실제로 무엇을 추천할지 계산합니다. CP-002(제안): AI는 추천할 뿐 결정하지
-// 않는다 — 이 도메인의 결과는 항상 사용자가 수정할 수 있는 "제안"입니다.
-//
-// Recommendation Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   Phase 1 [x] industryDetector.js      — 회사명 → 업종 추정 (지금 여기)
-//   Phase 1 [x] recommendationCatalog.js — 추천 후보 목록
-//   Phase 1 [x] recommendationEngine.js  — 실제 추천 계산(AI 호출 + 캐시)
-//   Phase 2 [ ] recommendationRules.js   — "업종 X면 색상 Y" 같은 명시적 규칙표가 필요해지면
-//   Phase 3 [ ] recommendationScore.js   — 여러 후보를 동시에 점수 매겨 비교해야 할 때,
-//                                          또는 STEP 7 Learning이 붙어 통계 기반 점수가 생길 때
-
-// ==================== domain/asset/index ====================
-// Asset Domain — 디자인 엔진의 "재료 창고". AI가 무엇을 고를 수 있는지 정의하는 카탈로그.
-//
-// Asset Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   catalog(지금) — 정적 카탈로그: 사람이 미리 정의해둔 선택지
-//   learning(미래) — STEP 7 Learning이 완성되면 learnedStyles.js/learnedColors.js가 생기고,
-//                    AI는 catalog + learning 둘을 함께 참고하게 됨. 아직 실사용 데이터가
-//                    없어 지금은 만들지 않음 (Company Domain의 companyLearning.js와 동일한 이유).
-
-// ==================== domain/frame/index ====================
-// Frame Domain — Recommendation이 고른 값을 실제 배치표로 바꿉니다.
-// (Recommendation → Frame → Asset → Kernel(DRS) → 최종 디자인)
-//
-// Frame Domain Roadmap
-//   Phase 1 [x] templates.js / photoTemplates.js / backLayouts.js / frameResolver.js
-//   Phase 2 [x] frameCodes.js — 업종-타입 코드 체계(v1, 신규 설계). "INS-F001" 스펙은
-//     실재를 확인할 수 없어(다른 세션의 Core_Principles.md/Issue_Registry_v1.0.md에도
-//     없음) 그대로 쓰지 않고, 실제 존재하는 업종(INDUSTRY_KEYWORDS)·템플릿(TEMPLATES/
-//     PHOTO_TEMPLATES)만 근거로 새로 설계했습니다. 업종별로 실제 다른 레이아웃을 만드는
-//     기능은 아직 없습니다(전 업종이 같은 TEMPLATE_LAYOUTS를 공유) — frameCode의 업종
-//     부분은 지금은 추천 이유 설명용이고, 실제 레이아웃 분기는 나중에 필요해지면 추가.
 
 // ==================== domain/kernel/designRules ====================
 // ── 명함 좌표 시스템 (Card Coordinate System) ──────────────────
@@ -2157,6 +1615,19 @@ function getQrSizePercent(mode) {
 
 // CP-001 판정(구조적 체크)은 /domain/validation/cpValidator.js(validateCP)로 이전됨 —
 // Kernel은 규칙을 "정의"하는 곳이고, 판정은 Validation의 역할입니다.
+
+// ==================== domain/frame/index ====================
+// Frame Domain — Recommendation이 고른 값을 실제 배치표로 바꿉니다.
+// (Recommendation → Frame → Asset → Kernel(DRS) → 최종 디자인)
+//
+// Frame Domain Roadmap
+//   Phase 1 [x] templates.js / photoTemplates.js / backLayouts.js / frameResolver.js
+//   Phase 2 [x] frameCodes.js — 업종-타입 코드 체계(v1, 신규 설계). "INS-F001" 스펙은
+//     실재를 확인할 수 없어(다른 세션의 Core_Principles.md/Issue_Registry_v1.0.md에도
+//     없음) 그대로 쓰지 않고, 실제 존재하는 업종(INDUSTRY_KEYWORDS)·템플릿(TEMPLATES/
+//     PHOTO_TEMPLATES)만 근거로 새로 설계했습니다. 업종별로 실제 다른 레이아웃을 만드는
+//     기능은 아직 없습니다(전 업종이 같은 TEMPLATE_LAYOUTS를 공유) — frameCode의 업종
+//     부분은 지금은 추천 이유 설명용이고, 실제 레이아웃 분기는 나중에 필요해지면 추가.
 
 // ==================== domain/pattern/patternLibrary ====================
 // ====================================================================
@@ -2398,6 +1869,15 @@ function buildLayoutFromPatterns(selections, options = {}) {
   return layout;
 }
 
+// ==================== domain/asset/index ====================
+// Asset Domain — 디자인 엔진의 "재료 창고". AI가 무엇을 고를 수 있는지 정의하는 카탈로그.
+//
+// Asset Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   catalog(지금) — 정적 카탈로그: 사람이 미리 정의해둔 선택지
+//   learning(미래) — STEP 7 Learning이 완성되면 learnedStyles.js/learnedColors.js가 생기고,
+//                    AI는 catalog + learning 둘을 함께 참고하게 됨. 아직 실사용 데이터가
+//                    없어 지금은 만들지 않음 (Company Domain의 companyLearning.js와 동일한 이유).
+
 // ==================== domain/frame/photoTemplates ====================
 // ====================================================================
 // Domain : Frame / Photo Templates
@@ -2451,14 +1931,35 @@ function computeEffectivePhotoRect(rect, offsetMm, scale, trimWidth, trimHeight)
   const scaledHMm = baseHMm * s;
   const centerXMm = baseCenterXMm + ox;
   const centerYMm = baseCenterYMm + oy;
-  const leftMm = centerXMm - scaledWMm / 2;
-  const topMm = centerYMm - scaledHMm / 2;
-  return {
-    left: (leftMm / trimWidth) * 100,
-    top: (topMm / trimHeight) * 100,
-    width: (scaledWMm / trimWidth) * 100,
-    height: (scaledHMm / trimHeight) * 100,
-  };
+  let leftMm = centerXMm - scaledWMm / 2;
+  let topMm = centerYMm - scaledHMm / 2;
+  let left = (leftMm / trimWidth) * 100;
+  let top = (topMm / trimHeight) * 100;
+  let width = (scaledWMm / trimWidth) * 100;
+  let height = (scaledHMm / trimHeight) * 100;
+
+  // 2026-08-07: "동그라미 사진을 키우니 카드 밖으로 벗어난다"는 신고 반영. 사진
+  // 배경형·상단형처럼 "원래부터 카드 가장자리에 닿게 디자인된" 종류는 그대로
+  // 도련까지 나가는 게 맞지만(의도된 디자인), 프로필 원형처럼 "원래 여백을 두고
+  // 카드 안에 떠 있던" 사진은 크기를 키우거나 옮겨도 카드 테두리 밖으로 나가면
+  // 안 됩니다. 판단 기준은 "원래(rect) 그 가장자리에 이미 닿아있었는가"입니다 —
+  // 이미 닿아있던 쪽(edge bleed가 의도된 쪽)은 그대로 두고, 원래 여백이 있던
+  // 쪽만 화면 안으로 붙잡아 둡니다.
+  const EDGE_EPS = 0.01;
+  const touchedLeft = rect.left <= EDGE_EPS;
+  const touchedRight = rect.left + rect.width >= 100 - EDGE_EPS;
+  const touchedTop = rect.top <= EDGE_EPS;
+  const touchedBottom = rect.top + rect.height >= 100 - EDGE_EPS;
+  if (!touchedLeft && left < 0) left = 0;
+  if (!touchedRight && left + width > 100) left = 100 - width;
+  if (!touchedTop && top < 0) top = 0;
+  if (!touchedBottom && top + height > 100) top = 100 - height;
+  // 카드보다 사진이 더 커지는 극단적인 경우, 그래도 최소한 카드 안쪽에서
+  // 시작하도록 한 번 더 안전장치를 둡니다.
+  if (!touchedLeft && !touchedRight) left = Math.max(0, Math.min(left, 100 - width));
+  if (!touchedTop && !touchedBottom) top = Math.max(0, Math.min(top, 100 - height));
+
+  return { left, top, width, height };
 }
 
 // 사진 자리(rect)만 따로 — Pattern Library가 다루지 않는 유일한 부분
@@ -2567,451 +2068,512 @@ function getPhotoLayoutFor(photoVariant) {
   };
 }
 
-// ==================== renderer/CardLayoutPreview ====================
-// 2026-08-01: "포토샵처럼 줄이 맞는지 비교해달라"는 요청으로 추가한 정렬 가이드용
-// 상수. 드래그 중인 요소가 다른 요소와 같은 정렬 방식(왼쪽-왼쪽/오른쪽-오른쪽/
-// 가운데-가운데, 위-위/아래-아래/중앙-중앙)으로 이 값(%) 이내로 가까워지면 빨간
-// 점선 가이드가 뜨고, 그 좌표로 살짝 자석처럼 붙습니다(스냅).
-const GUIDE_SNAP_THRESHOLD_PCT = 1.4;
-const GUIDE_LINE_COLOR = "#F5365C";
+// ==================== domain/export/cardFileExporter ====================
+// ====================================================================
+// Domain : Export / Card File Exporter
+// Version : 1.0 (신규 — 가장 중요한 공백을 메우는 파일)
+// Responsibility : 화면에 그려지는 미리보기(CardLayoutPreview)를 실제 인쇄에 쓸 수 있는
+//                  파일로 변환합니다. 지금까지 이 앱은 결제까지는 완벽했지만, "AI가
+//                  디자인한 명함을 실제 파일로 뽑아내는" 마지막 단계가 없었습니다 —
+//                  그게 없으면 인쇄소에 넘길 게 아무것도 없다는 지적이 정확했습니다.
+//
+// 왜 PNG나 PDF가 아니라 SVG인가:
+//   이 환경(브라우저)에서 실제로 만들 수 있는 도구 중, 별도 라이브러리 설치 없이
+//   벡터(글자가 확대해도 안 깨지는) 파일을 만들 수 있는 유일한 방법이 SVG입니다.
+//   SVG는 width/height를 "mm" 단위로 직접 지정할 수 있어서, 실물 명함 크기(예:
+//   90mm x 50mm)를 그대로 표현하는 진짜 물리적 치수의 파일이 됩니다 — 화면 픽셀을
+//   흉내 낸 이미지가 아니라, 인쇄소가 실제로 열어서 쓸 수 있는 벡터 원고입니다.
+//   대부분의 인쇄소·에디터(일러스트레이터, Inkscape 등)가 SVG를 직접 엽니다.
+//
+// 정직하게 밝히는 한계:
+//   - CMYK 색공간 변환은 안 합니다(SVG는 RGB로 정의됩니다) — 실제 인쇄 시 색상이
+//     미세하게 다르게 나올 수 있고, 이건 결제 화면에 안내 문구로 남겨야 합니다.
+//   - 재단선·눈금(크롭 마크)은 이 버전에 없습니다 — 안전영역·재단선 좌표 자체는
+//     정확하지만, 인쇄소가 요구하는 크롭마크 표시는 필요해지면 추가해야 합니다.
+//   - pt(포인트) 크기는 여기서는 실제 물리 단위(1pt = 0.3527778mm)로 정확히
+//     환산합니다 — 화면 미리보기(CardLayoutPreview)의 pt는 "표시상의 상대 크기"였지만,
+//     이 파일은 실제로 인쇄될 원고라 정확한 환산이 필요하고, 여기서 처음 제대로 합니다.
+// ====================================================================
 
-function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = true, fields, compact, cardSize = CARD_SIZE_DEFAULT, qrEnabled = false, qrUrl = "", nameEnglish = "", showContactIcon = true, backgroundStyle = "white", logoColor = null, logoFile = null, patternSelections = null, fontFamilyId = null, interactiveKind = null, onDragKindMove = null, onSelectKind = null, orientation = null }) {
-  // patternSelections가 있으면(=사용자가 위치조정 화면에서 패턴을 직접 골랐으면) 그
-  // 조합으로 실시간 계산하고, 없으면 템플릿의 기본 배치(getLayoutFor)를 그대로 씁니다.
-  // 사진형도 이제 company/person/logo/연락처 항목들은 Pattern Library를 씁니다 — 다만
-  // 사진 자리(rect)는 patternLibrary가 다루지 않는 유일한 부분이라 따로 병합합니다.
+
+
+
+
+const PT_TO_MM = 0.3527778;
+// 기존 emphasis(lg/md/sm) 기반 레이아웃(예: 사진형이 아직 patternSelections 없이 쓰일 때)은
+// pointSize가 없으므로, kernel/designRules.js의 TEXT_EMPHASIS_SIZE.full 값을 그대로
+// pt로 간주합니다. 2026-08-01: 예전엔 이 파일에 { lg: 13, md: 10, sm: 8.5 }를 따로
+// 하드코딩해 놨었는데, 그러다 보니 미리보기(designRules.js)에서 글자 크기를 키워도
+// 실제 인쇄파일(이 파일)에는 반영이 안 되는 문제가 있었습니다. 이제 designRules.js를
+// 그대로 import해서 쓰므로 두 곳이 항상 같은 값을 씁니다.
+const EMPHASIS_PT_FALLBACK = TEXT_EMPHASIS_SIZE.full;
+
+function escapeXml(str) {
+  return String(str).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
+}
+
+function textFor(key, fields, nameEnglish) {
+  if (key === "company") return fields?.["companyName"] || "회사명";
+  if (key === "position") return fields?.["position"] || "직위";
+  if (key === "personName") {
+    const base = fields?.["personName"] || "성명";
+    return nameEnglish?.trim() ? `${base} (${nameEnglish.trim()})` : base;
+  }
+  if (key === "mobile") return fields?.mobile?.trim() || null;
+  if (key === "telephoneFax") {
+    const tel = fields?.telephone?.trim();
+    const fax = fields?.fax?.trim();
+    if (tel && fax) return `${tel} · Fax ${fax}`;
+    if (tel) return tel;
+    if (fax) return `Fax ${fax}`;
+    return null;
+  }
+  if (key === "address") return fields?.address?.trim() || null;
+  if (key === "email") return fields?.email?.trim() || null;
+  if (key === "website") return fields?.website?.trim() || null;
+  if (key === "etc") return fields?.etc?.trim() || null;
+  return "";
+}
+
+// CardLayoutPreview.jsx와 정확히 같은 규칙(임계값 기반 정렬)을 씁니다 — 미리보기와
+// 실제 파일이 서로 다른 위치로 나오면 "본 것과 다르게 인쇄됐다"는 신뢰 문제가 생기므로,
+// 여기 계산은 renderer/CardLayoutPreview.jsx의 로직과 반드시 같게 유지해야 합니다.
+function alignFor(x) {
+  return x <= DESIGN_RULES.alignment.leftThreshold ? "left" : x >= DESIGN_RULES.alignment.rightThreshold ? "right" : "center";
+}
+function valignFor(y) {
+  return y <= DESIGN_RULES.alignment.leftThreshold ? "top" : y >= DESIGN_RULES.alignment.rightThreshold ? "bottom" : "middle";
+}
+
+function buildCardSVG({
+  templateName, photoVariant, showLogo = true, fields, cardSize, patternSelections = null,
+  fontFamilyId = null, backgroundStyle = "white", logoColor = null, logoDataUrl = null,
+  nameEnglish = "", showContactIcon = true, qrEnabled = false, orientation = null,
+}) {
+  // 2026-08-01: 미리보기와 마찬가지로, 명시적으로 고른 orientation이 있으면 그걸
+  // 그대로 쓰고(가로형/세로형을 직접 고를 수 있게 됐으므로), 없을 때만 예전처럼
+  // 사진 상단형/하단형 여부로 자동 추정합니다.
+  const spec = getCardSpec(cardSize, orientation || (isPortraitPhotoVariant(templateName, photoVariant) ? "portrait" : "landscape"));
+  const workingW = spec.trimWidth + spec.bleed * 2;
+  const workingH = spec.trimHeight + spec.bleed * 2;
+  const safeWidthMm = spec.trimWidth - spec.safeMargin * 2;
+  const safeHeightMm = spec.trimHeight - spec.safeMargin * 2;
+  const safeOriginXMm = spec.bleed + spec.safeMargin;
+  const safeOriginYMm = spec.bleed + spec.safeMargin;
+
   const photoRect = templateName === "사진형" ? (PHOTO_RECT_BY_VARIANT[photoVariant] || PHOTO_RECT_BY_VARIANT[PHOTO_TEMPLATES[0]]) : {};
   const layout = patternSelections
     ? { ...photoRect, ...buildLayoutFromPatterns(patternSelections, { overlay: templateName === "사진형" && !!PHOTO_TEMPLATE_PATTERN_SELECTIONS[photoVariant]?.overlay }) }
     : getLayoutFor(templateName, photoVariant);
-  // 2026-08-02: "사진형도 위치·크기를 옮길 수 있게 해달라"는 요청 반영 — 로고/텍스트와
-  // 같은 방식(mm 오프셋 누적 + 배율)으로 patternSelections에 저장해두고, 실제 그리는
-  // rect(%)는 매 렌더마다 기본값 + 이 값을 합쳐서 계산합니다.
-  const photoOffsetMm = patternSelections?.photoFineOffsetMm || { x: 0, y: 0 };
-  const photoScale = patternSelections?.photoScale || 1;
-  const mode = compact ? "compact" : "full";
-  // 2026-08-01: 이제 가로형/세로형을 사용자가 직접 고를 수 있어서(카드 모양 토글),
-  // 그 값(orientation prop)이 있으면 그대로 쓰고, 없을 때만(옛 호출부·아직 안 옮긴
-  // 곳) 사진 상단형/하단형 여부로 자동 추정하던 기존 방식으로 대체합니다.
-  const spec = getCardSpec(cardSize, orientation || (isPortraitPhotoVariant(templateName, photoVariant) ? "portrait" : "landscape"));
-  const effectivePhotoRect = layout.photo ? computeEffectivePhotoRect(layout.photo.rect, photoOffsetMm, photoScale, spec.trimWidth, spec.trimHeight) : null;
-  const safeXPct = (spec.safeMargin / spec.trimWidth) * 100;
-  const safeYPct = (spec.safeMargin / spec.trimHeight) * 100;
+
   const bgOption = BACKGROUND_STYLE_OPTIONS.find((b) => b.id === backgroundStyle);
-  const bgCss = bgOption?.css || "var(--paper-white)";
-  // 사진이 카드를 덮는 경우(overlay, 사진 배경형)뿐 아니라 짙은 배경색(gradient 등)을
-  // 골랐을 때도 흰 텍스트가 필요합니다 — 예전엔 overlay만 봐서, 짙은 배경을 고르면
-  // 어두운 글자가 거의 안 보이는 문제가 있었습니다.
   const needsLightText = bgOption?.dark === true;
-  // fontFamilyId는 문자열(전체 공통 서체) 또는 { company, person, default } 객체(요소별
-  // 서체) 둘 다 받습니다 — "상호 서체를 따로", "이름·직위 서체도 따로" 요청 반영.
-  // 문자열로 넘어오면(예전 호출 방식) 전부 같은 서체를 씁니다.
   const fontForKind = (kind) => {
-    const lookupKind = kind === "position" ? "personName" : kind; // 직위는 이름 서체 선택을 같이 씁니다(선택 UI가 하나뿐이라서)
-    const id = typeof fontFamilyId === "string" ? fontFamilyId : (fontFamilyId?.[lookupKind] || fontFamilyId?.default);
+    const id = typeof fontFamilyId === "string" ? fontFamilyId : (fontFamilyId?.[kind] || fontFamilyId?.default);
     return resolveFontFamily(id);
   };
-
-  const photoUrl = React.useMemo(() => (photoFile ? URL.createObjectURL(photoFile) : null), [photoFile]);
-  React.useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
-
-  // CP-003: 업로드한 로고는 AI가 재창작하지 않고 그대로(원본 비율 유지) 보여줍니다 — 색상 박스로 대체하지 않음.
-  const logoUrl = React.useMemo(() => (logoFile?.type?.startsWith("image/") ? URL.createObjectURL(logoFile) : null), [logoFile]);
-  React.useEffect(() => () => { if (logoUrl) URL.revokeObjectURL(logoUrl); }, [logoUrl]);
-
-  // 연락처 관련 필드를 "contact"라는 한 덩어리로 뭉쳐 그리던 걸 그만두고, 각각을
-  // 독립된 요소로 다룹니다 — "핸드폰번호도 개별적으로 위치·크기를 바꿀 수 있으면
-  // 좋겠다"는 요청 반영. telephoneFax는 전화번호+팩스번호를 한 줄에 같이 보여달라는
-  // 요청을 반영한 합성 필드입니다. 값이 없는 항목은 null을 돌려주고, 그 요소는
-  // 아예 그리지 않습니다(렌더 루프에서 스킵).
-  const textFor = (key) => {
-    if (key === "company") return fields?.["companyName"] || TEXTS.fallbackCompanyName;
-    // "person"(직위·이름 묶음)을 독립 요소 두 개로 나눴습니다 — 크기를 따로
-    // 조절 못 해서 "직위가 이름보다 작아야 하는데 같이 커진다"는 문제가 있었습니다.
-    if (key === "position") return fields?.["position"] || TEXTS.fallbackPosition;
-    if (key === "personName") {
-      const base = fields?.["personName"] || TEXTS.fallbackPersonName;
-      return nameEnglish?.trim() ? `${base} (${nameEnglish.trim()})` : base;
-    }
-    if (key === "mobile") return fields?.mobile?.trim() || null;
-    if (key === "telephoneFax") {
-      const tel = fields?.telephone?.trim();
-      const fax = fields?.fax?.trim();
-      if (tel && fax) return `${tel} · Fax ${fax}`;
-      if (tel) return tel;
-      if (fax) return `Fax ${fax}`;
-      return null;
-    }
-    if (key === "address") return fields?.address?.trim() || null;
-    if (key === "email") return fields?.email?.trim() || null;
-    if (key === "website") return fields?.website?.trim() || null;
-    if (key === "etc") return fields?.etc?.trim() || null;
-    return "";
-  };
   const CONTACT_SUB_KINDS = ["mobile", "telephoneFax", "address", "email", "website", "etc"];
-  const anyContactFilled = CONTACT_SUB_KINDS.some((k) => layout[k] && textFor(k));
-  const FIELD_ICON = { mobile: Phone, telephoneFax: Phone, address: MapPin, email: Mail, website: Globe };
-  const defaultEmphasis = { company: "lg", position: "sm", personName: "md" };
+  const anyContactFilled = CONTACT_SUB_KINDS.some((k) => layout[k] && textFor(k, fields, nameEnglish));
 
-  // 2026-08-01: "위치조정은 버튼 대신 미리보기에서 손가락/마우스로 직접 옮기게 해달라"는
-  // 요청으로 드래그 기능을 추가했습니다. safeAreaRef는 안전영역 박스(children의 left/top
-  // %가 이 박스 기준)를 가리키고, dragRef는 드래그 중인 요소와 마지막 포인터 좌표를
-  // 들고 있습니다(리렌더와 무관하게 유지해야 해서 state가 아니라 ref). 이동량은 매
-  // pointermove마다 "직전 위치 대비 델타"를 mm로 환산해 onDragKindMove로 부모에
-  // 넘기고, 부모가 patternSelections의 FineOffsetMm에 누적합니다 — 그 값은 항상
-  // Kernel(designRules.js)의 clampToAllowedRegion을 다시 거치므로, 아무리 세게
-  // 끌어도 안전영역·재단선을 벗어난 값이 될 수 없습니다.
-  // 2026-08-01(추가): "순서대로 안내하는 것도 좋지만, 중간에 마음이 바뀌면 아무
-  // 요소나 눌러서 바로 옮길 수 있어야 한다"는 요청 반영. 이제 onPointerDown이 눌린
-  // 요소를 즉시 선택(onSelectKind)하고 같은 제스처로 바로 드래그를 시작합니다 —
-  // "이전"을 여러 번 눌러야 원하는 항목으로 돌아갈 수 있던 불편을 없앴습니다.
-  // interactiveKind는 여전히 "지금 안내 문구가 가리키는 항목"이자 강조 표시 대상이고,
-  // 안내 순서(이전/다음)는 그대로 같이 쓸 수 있습니다.
-  const safeAreaRef = React.useRef(null);
-  const dragRef = React.useRef(null);
-  // 2026-08-01: 정렬 가이드/스냅 계산용 — 매 렌더마다 모든 요소의 최신 좌표를
-  // 여기 캐시해둡니다(아래 렌더 부분 참고). pointermove 핸들러에서 "직전 렌더의
-  // 다른 요소 좌표"와 비교해 자석처럼 붙일지 판단합니다. ref라서 리렌더를
-  // 일으키지 않고, 이벤트 핸들러 안에서 최신 값을 즉시 읽을 수 있습니다.
-  const elementGeomsRef = React.useRef([]);
-  const [isDragging, setIsDragging] = React.useState(false);
-  const handleDragPointerDown = (e, key) => {
-    if (!onDragKindMove) return;
-    e.preventDefault();
-    onSelectKind?.(key);
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    const geom = elementGeomsRef.current.find((g) => g.key === key);
-    // 2026-08-01(버그 수정): "줄 맞추기(스냅)에 한 번 붙으면 그 뒤로는 마우스를
-    // 움직여도 안 움직인다"는 신고 반영. 원인은 화면에 실제로 보이는 좌표만 갖고
-    // "여기서 가까우면 다시 붙인다"를 매번 재판정하던 것 — 한 번 스냅되면 다음
-    // 프레임에도 여전히 가까우니 계속 다시 붙잡혀서, 마우스가 조금씩 움직이는
-    // 정도로는 절대 빠져나올 수 없었습니다. 고쳐서 이제 rawX/rawY(스냅과 무관하게
-    // 마우스를 있는 그대로 계속 따라가는 "진짜" 좌표)를 별도로 누적합니다 — 화면엔
-    // 스냅된 좌표가 보이지만, 마우스가 계속 멀어지면 rawX/rawY도 계속 멀어지다가
-    // 임계값을 넘는 순간 자연스럽게 스냅이 풀립니다(포토샵과 같은 방식).
-    dragRef.current = { key, x: e.clientX, y: e.clientY, rawX: geom ? geom.x : 50, rawY: geom ? geom.y : 50 };
-    setIsDragging(true);
-  };
-  const handleDragPointerMove = (e, key) => {
-    const st = dragRef.current;
-    if (!st || st.key !== key) return;
-    const rect = safeAreaRef.current?.getBoundingClientRect();
-    if (!rect || !rect.width || !rect.height) return;
-    const dxPercent = ((e.clientX - st.x) / rect.width) * 100;
-    const dyPercent = ((e.clientY - st.y) / rect.height) * 100;
-    st.x = e.clientX; st.y = e.clientY;
-    // 스냅과 무관하게, 마우스가 실제로 움직인 만큼 그대로 누적합니다.
-    st.rawX += dxPercent;
-    st.rawY += dyPercent;
+  const parts = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${workingW}mm" height="${workingH}mm" viewBox="0 0 ${workingW} ${workingH}">`);
+  // 배경(도련 전체 — 실제 인쇄에서는 도련까지 배경색이 깔려야 흰 테두리가 안 남습니다)
+  const bgFill = bgOption?.id === "gradient" ? "url(#bgGradient)" : (bgOption?.id === "soft" ? "#F4F1FB" : "#FFFFFF");
+  if (bgOption?.id === "gradient") {
+    parts.push(`<defs><linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6C4CF0"/><stop offset="100%" stop-color="#4C6FFF"/></linearGradient></defs>`);
+  }
+  parts.push(`<rect x="0" y="0" width="${workingW}" height="${workingH}" fill="${bgFill}"/>`);
 
-    const safeWidthMm = spec.trimWidth - spec.safeMargin * 2;
-    const safeHeightMm = spec.trimHeight - spec.safeMargin * 2;
-
-    // 2026-08-01: "포토샵처럼 줄이 맞는지 비교해달라"는 요청으로 추가한 정렬 스냅.
-    // 직전 렌더에서 캐시해둔 다른 요소들의 좌표(elementGeomsRef)와 비교해서, 같은
-    // 정렬 방식(예: 오른쪽 정렬끼리)끼리 "진짜 좌표(rawX/rawY)"가 GUIDE_SNAP_THRESHOLD_PCT
-    // 이내로 가까우면 그 좌표에 정확히 붙습니다. 비교 기준이 화면에 보이는 좌표가
-    // 아니라 rawX/rawY라서, 마우스가 계속 멀어지면 반드시 풀립니다(더 이상 "덫"에
-    // 걸리지 않음).
-    const prevGeoms = elementGeomsRef.current;
-    const activePrev = prevGeoms.find((g) => g.key === key);
-    let targetX = st.rawX;
-    let targetY = st.rawY;
-    if (activePrev) {
-      const others = prevGeoms.filter((g) => g.key !== key);
-      const matchX = others.find((g) => g.align === activePrev.align && Math.abs(g.x - st.rawX) < GUIDE_SNAP_THRESHOLD_PCT);
-      if (matchX) targetX = matchX.x;
-      const matchY = others.find((g) => g.valign === activePrev.valign && Math.abs(g.y - st.rawY) < GUIDE_SNAP_THRESHOLD_PCT);
-      if (matchY) targetY = matchY.y;
+  // 2026-08-02: "안전영역 재정의" 반영 — 텍스트·로고는 안전영역(safeMargin) 안에
+  // 머물러야 하지만(기존 그대로, resolveElementPosition의 clampToAllowedRegion이
+  // 담당), 배경색·그림(사진)처럼 "디자인의 배경이 되는 요소"는 재단선(trim)이 아니라
+  // 도련까지 포함한 작업선까지 꽉 채워야 합니다 — 재단 시 아주 약간의 오차가 있어도
+  // 흰 테두리가 남지 않게 하기 위해서입니다. 배경색은 이미 도련 전체를 채우고
+  // 있었는데(위 rect), 사진(photo) rect는 trim 기준으로만 계산되어 있어서 카드
+  // 가장자리에 닿는 사진(사진 배경형·상단형·하단형·분할형·우측형)에서 도련만큼
+  // 얇게 흰 여백이 남는 진짜 버그가 있었습니다. 아래에서, 사진 영역이 원래 카드의
+  // 어느 가장자리(0% 또는 100%)에 닿아있었는지 보고, 닿아있던 쪽으로만 도련만큼
+  // 밀어서 확장합니다(중앙에 떠 있는 프로필 원형 같은 사진은 어느 쪽도 안 닿아있으니
+  // 그대로 둡니다).
+  if (layout.photo) {
+    // 2026-08-02: "사진형도 위치·크기를 옮길 수 있게 해달라"는 요청 반영 — 미리보기와
+    // 똑같은 함수(computeEffectivePhotoRect)로 사용자가 옮긴 만큼을 먼저 반영한
+    // "실제" rect를 구하고, 도련 확장 여부(아래)는 원래 정의가 아니라 이 조정된
+    // rect가 지금 가장자리에 닿아있는지를 기준으로 다시 판단합니다 — 그래야 사진을
+    // 조금 옮긴 뒤에도 도련 처리가 계속 정확합니다.
+    const photoOffsetMm = patternSelections?.photoFineOffsetMm || { x: 0, y: 0 };
+    const photoScale = patternSelections?.photoScale || 1;
+    const rect = computeEffectivePhotoRect(layout.photo.rect, photoOffsetMm, photoScale, spec.trimWidth, spec.trimHeight);
+    let px = spec.bleed + (rect.left / 100) * spec.trimWidth;
+    let py = spec.bleed + (rect.top / 100) * spec.trimHeight;
+    let pw = (rect.width / 100) * spec.trimWidth;
+    let ph = (rect.height / 100) * spec.trimHeight;
+    const EDGE_EPS = 0.01; // % 단위 반올림 오차 허용
+    if (rect.left <= EDGE_EPS) { px -= spec.bleed; pw += spec.bleed; }
+    if (rect.left + rect.width >= 100 - EDGE_EPS) { pw += spec.bleed; }
+    if (rect.top <= EDGE_EPS) { py -= spec.bleed; ph += spec.bleed; }
+    if (rect.top + rect.height >= 100 - EDGE_EPS) { ph += spec.bleed; }
+    if (layout.photo.shape === "circle") {
+      parts.push(`<clipPath id="photoClip"><ellipse cx="${px + pw / 2}" cy="${py + ph / 2}" rx="${pw / 2}" ry="${ph / 2}"/></clipPath>`);
     }
-    // 화면에 실제로 적용할 델타 = (스냅 적용된 목표 좌표) − (지금 화면에 보이는 좌표)
-    const displayedX = activePrev ? activePrev.x : st.rawX;
-    const displayedY = activePrev ? activePrev.y : st.rawY;
-    const dxMm = ((targetX - displayedX) / 100) * safeWidthMm;
-    const dyMm = ((targetY - displayedY) / 100) * safeHeightMm;
+    parts.push(`<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#E9E7F5" ${layout.photo.shape === "circle" ? 'clip-path="url(#photoClip)"' : ""}/>`);
+    // 실제 고객 사진 파일은 이 자리에 <image>로 들어가야 하지만, 여기서는 사진 자체를
+    // 다루지 않습니다(사진형 주문은 아직 사진 업로드가 이 파이프라인과 안 이어져 있음 —
+    // 별도로 확인이 필요합니다).
+  }
 
-    if (dxMm || dyMm) onDragKindMove(key, dxMm, dyMm);
-  };
-  const handleDragPointerUp = (e, key) => {
-    if (dragRef.current?.key === key) dragRef.current = null;
-    setIsDragging(false);
-  };
+  // 각 요소(로고/회사명/이름·직위/연락처 세부항목)
+  for (const [key, pos] of Object.entries(layout)) {
+    if (pos.kind === "photo") continue;
+    if (pos.kind === "logo" && !showLogo) continue;
+    const text = textFor(key, fields, nameEnglish);
+    const isMobileFallback = key === "mobile" && text === null && !anyContactFilled;
+    if (text === null && !isMobileFallback) continue;
+    const displayText = isMobileFallback ? "010-0000-0000" : text;
 
+    const { x, y } = resolveElementPosition(pos.kind, pos, spec);
+    const xMm = safeOriginXMm + (x / 100) * safeWidthMm;
+    const yMm = safeOriginYMm + (y / 100) * safeHeightMm;
+    const align = alignFor(x);
+    const valign = valignFor(y);
+    const isLogo = pos.kind === "logo";
+
+    if (isLogo) {
+      // LOGO_SIZE_PERCENT의 full 모드 값(%, 안전영역 너비 기준)을 그대로 mm로 환산
+      const sizePercent = LOGO_SIZE_PERCENT.full[pos.size || "md"];
+      const sizeMm = (sizePercent / 100) * safeWidthMm;
+      const boxX = align === "left" ? xMm : align === "right" ? xMm - sizeMm : xMm - sizeMm / 2;
+      const boxY = valign === "top" ? yMm : valign === "bottom" ? yMm - sizeMm : yMm - sizeMm / 2;
+      if (logoDataUrl) {
+        parts.push(`<image x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
+      } else {
+        parts.push(`<rect x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" fill="${resolveLogoColor(logoColor)}" stroke="rgba(0,0,0,0.18)" stroke-width="0.2"/>`);
+      }
+      continue;
+    }
+
+    const pointSizePt = pos.pointSize != null ? pos.pointSize : EMPHASIS_PT_FALLBACK[pos.emphasis || "md"];
+    const fontSizeMm = pointSizePt * PT_TO_MM;
+    const fontDef = fontForKind(key);
+    const fill = (pos.overlay || needsLightText) ? "#FFFFFF" : "#1A1A22";
+    const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
+    // SVG의 dominant-baseline만으로 valign(top/middle/bottom)을 정확히 맞추기 어려워서,
+    // y좌표 자체를 폰트 크기 기준으로 보정합니다 — 화면(CSS translate)과 같은 결과를 냅니다.
+    const yAdjusted = valign === "top" ? yMm + fontSizeMm * 0.8 : valign === "bottom" ? yMm - fontSizeMm * 0.2 : yMm + fontSizeMm * 0.3;
+    parts.push(
+      `<text x="${xMm}" y="${yAdjusted}" font-size="${fontSizeMm}" font-family="${escapeXml(fontDef.family.replace(/'/g, ""))}" font-weight="${fontDef.weight}" fill="${fill}" text-anchor="${anchor}">${escapeXml(displayText)}</text>`
+    );
+  }
+
+  parts.push(`</svg>`);
+  return parts.join("\n");
+}
+
+function svgToDataUrl(svgString) {
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgString)))}`;
+}
+
+// 뒷면 패널 하나만 그립니다 — BACK_LAYOUTS(domain/frame/backLayouts.js)의 logo/qr/blank/
+// text 중 하나("custom"은 사람이 직접 디자인하므로 여기서 다루지 않습니다).
+// 2026-08-01: "text"(문구형) 추가 — 여러 줄 문구를 정렬(왼쪽/가운데/오른쪽)·서체
+// 선택해서 넣을 수 있습니다. backContent = { lines: string[], align: "left"|"center"|"right", fontFamilyId }.
+function buildBackPanelSVG(choice, spec, offsetX, logoDataUrl, logoColor, backContent = null) {
+  const workingW = spec.trimWidth + spec.bleed * 2;
+  const workingH = spec.trimHeight + spec.bleed * 2;
+  const cx = offsetX + workingW / 2;
+  const cy = workingH / 2;
+  const parts = [`<rect x="${offsetX}" y="0" width="${workingW}" height="${workingH}" fill="#FFFFFF"/>`];
+  if (choice === "logo") {
+    const size = Math.min(workingW, workingH) * 0.35;
+    if (logoDataUrl) {
+      parts.push(`<image x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
+    } else {
+      parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="${resolveLogoColor(logoColor)}"/>`);
+    }
+  } else if (choice === "qr") {
+    const size = Math.min(workingW, workingH) * 0.4;
+    parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="#1A1A22"/>`);
+    parts.push(`<text x="${cx}" y="${cy}" font-size="4" fill="#fff" text-anchor="middle" dominant-baseline="middle">QR</text>`);
+  } else if (choice === "text" && backContent) {
+    const lines = (backContent.lines || []).filter((l) => l.trim());
+    const fontDef = resolveFontFamily(backContent.fontFamilyId);
+    const align = backContent.align || "left";
+    const marginMm = spec.safeMargin + spec.bleed;
+    const textAnchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
+    const xPos = align === "left" ? offsetX + marginMm : align === "right" ? offsetX + workingW - marginMm : cx;
+    // 폰트 크기는 줄 수에 따라 살짝 줄여서(너무 많이 넣으면 겹치는 대신 작아지게)
+    // 최소한의 안전장치를 둡니다 — 앞면처럼 정교한 겹침 방지는 아니지만, 아예 안전선을
+    // 벗어나 잘리는 것보다는 낫습니다.
+    const fontSize = lines.length <= 3 ? 5.5 : lines.length <= 6 ? 4.2 : 3.4;
+    const lineHeight = fontSize * 1.5;
+    const totalHeight = lines.length * lineHeight;
+    const startY = cy - totalHeight / 2 + fontSize;
+    lines.forEach((line, i) => {
+      const y = startY + i * lineHeight;
+      const safeLine = String(line).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      parts.push(`<text x="${xPos}" y="${y}" font-size="${fontSize}" font-family="${fontDef.family}" font-weight="${fontDef.weight}" fill="#1A1A22" text-anchor="${textAnchor}">${safeLine}</text>`);
+    });
+  }
+  // "blank"은 배경만 있는 빈 뒷면입니다.
+  return parts.join("\n");
+}
+
+// 앞면 SVG 문자열(buildCardSVG의 결과)과 뒷면 선택지를 받아, 인쇄소가 한 파일에서
+// 양면을 바로 알아볼 수 있도록 나란히 배치한 하나의 SVG로 합칩니다. 각 패널 위에
+// "앞면"/"뒷면" 표시는 실제 인쇄 영역(도련) 바깥의 여유 공간에만 넣어서, 인쇄되는
+// 카드 내용 자체에는 전혀 영향이 없습니다.
+// 2026-08-01: "가로형/세로형을 앞뒤 독립적으로 고를 수 있어야 한다"는 요청으로
+// frontSpec/backSpec을 따로 받습니다(카드 바깥 모양은 물리적으로 앞뒤가 같아야
+// 하지만 — 한 장의 카드니까 — 그 안 내용 배치는 완전히 독립적입니다. 앞뒤를 다른
+// 모양으로 고르면 그 상태 그대로 반영됩니다. 자동으로 서로 맞춰 돌리는 기능은
+// "흔치 않은 경우라 필요 없다"고 확인받아 만들지 않았습니다). 높이가 서로 다르면
+// 짧은 쪽을 세로 가운데로 맞춰서 나란히 놓습니다.
+function buildDoubleSidedSVG(frontSvgInner, backLayoutChoice, frontSpec, logoDataUrl, logoColor, backContent = null, backSpec = frontSpec) {
+  const frontW = frontSpec.trimWidth + frontSpec.bleed * 2;
+  const frontH = frontSpec.trimHeight + frontSpec.bleed * 2;
+  const backW = backSpec.trimWidth + backSpec.bleed * 2;
+  const backH = backSpec.trimHeight + backSpec.bleed * 2;
+  const gap = 10; // mm, 앞/뒤 사이 여백
+  const labelHeight = 6; // mm, 라벨용 여유
+  const totalW = frontW + gap + backW;
+  const maxPanelH = Math.max(frontH, backH);
+  const totalH = maxPanelH + labelHeight;
+  const frontOffsetY = (maxPanelH - frontH) / 2;
+  const backOffsetY = (maxPanelH - backH) / 2;
+  const backOffsetX = frontW + gap;
+  const frontInnerMatch = frontSvgInner.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
+  const frontInner = frontInnerMatch ? frontInnerMatch[1] : frontSvgInner;
+
+  const parts = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}mm" height="${totalH}mm" viewBox="0 0 ${totalW} ${totalH}">`);
+  parts.push(`<text x="0" y="4" font-size="3" fill="#999">앞면 (Front)</text>`);
+  parts.push(`<text x="${backOffsetX}" y="4" font-size="3" fill="#999">뒷면 (Back)</text>`);
+  parts.push(`<g transform="translate(0, ${labelHeight + frontOffsetY})">${frontInner}</g>`);
+  parts.push(`<g transform="translate(0, ${labelHeight + backOffsetY})">${buildBackPanelSVG(backLayoutChoice, backSpec, backOffsetX, logoDataUrl, logoColor, backContent)}</g>`);
+  parts.push(`</svg>`);
+  return parts.join("\n");
+}
+
+// ==================== screens/Payment ====================
+function Payment({ order, patch, go, back, paper, category, unit, optTotal, shipFee, goodsTotal, grandTotal }) {
+  const [agreedTerms, setAgreedTerms] = useState(false);
+  const [validationMsg, setValidationMsg] = useState("");
+  const [highlightTerms, setHighlightTerms] = useState(false);
+  const depositorRef = React.useRef(null);
+  const termsBoxRef = React.useRef(null);
+  const optLines = Object.entries(order.selOptions)
+    .map(([code, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === code), sel))
+    .filter(Boolean);
   return (
-    <div style={{
-      position: "relative", width: "100%", aspectRatio: `${spec.trimWidth} / ${spec.trimHeight}`,
-      background: bgCss, border: "none", borderRadius: 4, overflow: "hidden",
-    }}>
-      {/* 2026-08-01: 요소를 선택할 때 0.5초 정도 부드럽게 "반짝"하는 강조 효과용
-          keyframes. isActive가 mount될 때마다(요소를 새로 선택할 때마다) 재생됩니다. */}
-      {!compact && onDragKindMove && (
-        <style>{`
-          @keyframes cardstudioSelectPulse {
-            0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.55); }
-            60% { box-shadow: 0 0 0 7px rgba(59,130,246,0); }
-            100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
-          }
-        `}</style>
-      )}
-      <div style={{
-        position: "absolute",
-        left: 0, top: 0, right: 0, bottom: 0,
-      }}>
-        {/* 사진(Photo)은 zone 기반이 아니라 재단선 기준 사각형(rect, %)으로 바로 배치합니다 — 로고와 달리 넓은 영역을 차지하기 때문.
-            2026-08-02: 이제 로고·텍스트와 같은 방식으로 눌러서 옮기고(드래그), 아래 크기조절 버튼으로 배율도 바꿀 수 있습니다. */}
-        {layout.photo && effectivePhotoRect && (() => {
-          const isSelectable = !!onDragKindMove;
-          const isActive = isSelectable && interactiveKind === "photo";
-          return (
-            <div
-              onPointerDown={isSelectable ? (e) => handleDragPointerDown(e, "photo") : undefined}
-              onPointerMove={isSelectable ? (e) => handleDragPointerMove(e, "photo") : undefined}
-              onPointerUp={isSelectable ? (e) => handleDragPointerUp(e, "photo") : undefined}
-              onPointerCancel={isSelectable ? (e) => handleDragPointerUp(e, "photo") : undefined}
-              style={{
-                position: "absolute",
-                left: `${effectivePhotoRect.left}%`, top: `${effectivePhotoRect.top}%`,
-                width: `${effectivePhotoRect.width}%`, height: `${effectivePhotoRect.height}%`,
-                borderRadius: layout.photo.shape === "circle" ? "50%" : 0,
-                overflow: "hidden",
-                background: photoUrl ? `center / cover no-repeat url(${photoUrl})` : "var(--paper-deep)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                ...(isSelectable
-                  ? {
-                      cursor: "grab", touchAction: "none", userSelect: "none",
-                      outline: isActive ? `2px solid ${SELECTED_ACCENT_COLOR}` : "1px dashed rgba(0,0,0,0.18)",
-                      outlineOffset: 4,
-                    }
-                  : {}),
-              }}
-            >
-              {!photoUrl && !compact && <Camera size={18} color="var(--ink-soft)" />}
-              {isActive && (
-                <>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      position: "absolute", top: -4, left: -4, right: -4, bottom: -4,
-                      borderRadius: layout.photo.shape === "circle" ? "50%" : 8,
-                      animation: "cardstudioSelectPulse 0.6s ease-out",
-                      pointerEvents: "none",
-                    }}
-                  />
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      position: "absolute", top: -10, right: -10,
-                      width: 20, height: 20, borderRadius: "50%",
-                      background: SELECTED_ACCENT_COLOR, color: "#fff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 11, boxShadow: "0 0 0 1.5px #fff", zIndex: 2, pointerEvents: "none",
-                    }}
-                  >
-                    ✥
-                  </span>
-                </>
-              )}
-            </div>
-          );
-        })()}
+    <div className="app-body">
+      <TopBar title={TEXTS.paymentTitle} onBack={back} step={6} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.orderSummaryTitle}</div>
+          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
+          <SummaryRow k={TEXTS.summaryPaperLabel} v={paper?.name} />
+          {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
+          <SummaryRow k={TEXTS.summaryOptionLabel} v={optLines.length ? optLines.join(", ") : TEXTS.summaryNone} />
+          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
+          <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
+        </Card>
 
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
+          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
+          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
+          <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 14, fontWeight: 900 }}>{TEXTS.grandTotalLabel}</span>
+            <span style={{ fontSize: 17, fontWeight: 900, color: "var(--stamp)" }}>{won(grandTotal)}</span>
+          </div>
+        </Card>
+
+        <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <Landmark size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{TEXTS.bankInfoTitle}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.bankAccount}</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.bankHolder}</div>
+            </div>
+          </div>
+        </Card>
+
+        <Field label={TEXTS.depositorLabel}><input ref={depositorRef} style={inputStyle} value={order.depositor} onChange={(e) => patch({ depositor: e.target.value })} placeholder={TEXTS.depositorPlaceholder} /></Field>
+
+        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 10, lineHeight: 1.5 }}>{TEXTS.cmykColorNotice}</div>
+
+        {/* 2026-08-04: "체크를 해야 버튼이 눌리는데, 그걸 몰랐다"는 신고 반영 —
+            기존엔 옅은 회색 글씨 + 작은 체크박스뿐이라 눈에 잘 안 띄었습니다.
+            제목이 있는 박스로 감싸서 "여기 뭔가 확인할 게 있다"는 게 먼저
+            눈에 들어오게 했습니다. */}
         <div
-          ref={safeAreaRef}
+          ref={termsBoxRef}
+          onClick={() => { setAgreedTerms((v) => !v); setValidationMsg(""); }}
           style={{
-            position: "absolute",
-            left: `${safeXPct}%`, top: `${safeYPct}%`, right: `${safeXPct}%`, bottom: `${safeYPct}%`,
-            border: compact ? "none" : "1px dashed rgba(108,76,240,0.35)",
+            marginTop: 14, padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+            border: `${highlightTerms ? 2.5 : 1.5}px solid ${agreedTerms ? "var(--stamp)" : "#F0B429"}`,
+            background: agreedTerms ? "rgba(108,76,240,0.05)" : "#FFFBEB",
+            boxShadow: highlightTerms ? "0 0 0 4px rgba(240,180,41,0.35)" : "none",
+            transition: "box-shadow 0.3s, border-width 0.2s",
           }}
         >
-          {/* 2026-08-01: Object.entries(layout) 대신 ALL_PATTERN_KINDS 고정 순서로 돕니다 —
-              layout 객체의 키 순서가 아래 조절 패널의 순서와 어긋나 있던 게 "미리보기랑
-              조절 버튼이 따로 논다"는 혼란의 원인이었습니다. 이제 이 배열 하나가 미리보기
-              그리는 순서와 조절 패널 항목 순서 둘 다의 기준입니다(patternLibrary.js에서 export). */}
-          {(() => {
-            // 2026-08-01: 예전엔 이 자리에서 바로 JSX를 반환하는 한 번짜리 .map이었는데,
-            // 정렬 가이드 선을 그리려면 "다른 모든 요소들의 좌표"가 먼저 다 계산돼
-            // 있어야 해서 데이터 계산(elements)과 JSX 렌더를 두 단계로 나눴습니다.
-            // 로직 자체는 그대로 옮긴 것뿐이라 계산 결과는 이전과 동일합니다.
-            const elements = ALL_PATTERN_KINDS.map((key) => {
-              const pos = layout[key];
-              if (!pos) return null;
-              if (pos.kind === "photo") return null; // 위에서 이미 그림
-              if (pos.kind === "logo" && !showLogo) return null;
-              // 값이 없는 연락처 하위 항목은 그리지 않습니다 — 다만 전부 비어있으면
-              // (한 항목도 안 채웠으면) mobile 자리에 안내용 예시를 하나만 보여줍니다.
-              const text = textFor(key);
-              const isMobileFallback = key === "mobile" && text === null && !anyContactFilled;
-              if (text === null && !isMobileFallback) return null;
-              const displayText = isMobileFallback ? TEXTS.fallbackPhone : text;
-
-              const { x, y } = resolveElementPosition(pos.kind, pos, spec);
-              const isLogo = pos.kind === "logo";
-              const align = x <= DESIGN_RULES.alignment.leftThreshold ? "left" : x >= DESIGN_RULES.alignment.rightThreshold ? "right" : "center";
-              const translateX = align === "left" ? "0%" : align === "right" ? "-100%" : "-50%";
-              // 세로 방향도 가로와 동일한 임계값 규칙을 적용합니다 — 이게 없으면 y가 0(맨 위)이나
-              // 100(맨 아래)인 요소가 항상 세로 중앙 정렬(-50%)되어 버려서, 박스의 절반이 안전영역
-              // 경계 밖(도련·재단선 쪽)으로 삐져나가는 문제가 있었습니다(특히 연락처가 맨 아래에
-              // 걸쳐서 인쇄 시 잘릴 수 있는 문제). 위/아래 가장자리 근처에서는 박스를 안쪽으로만
-              // 펼치고, 중간 영역에서만 중앙 정렬합니다.
-              const valign = y <= DESIGN_RULES.alignment.leftThreshold ? "top" : y >= DESIGN_RULES.alignment.rightThreshold ? "bottom" : "middle";
-              const translateY = valign === "top" ? "0%" : valign === "bottom" ? "-100%" : "-50%";
-              const emphasis = pos.emphasis || defaultEmphasis[key] || "md";
-              const logoSize = pos.size || "md";
-              const fontDef = fontForKind(key);
-              // pointSize가 있으면(=Pattern Library 경로) 그 값을 쓰고, 없으면(=아직
-              // Pattern Library로 안 옮긴 레이아웃) 기존 emphasis 3단계를 씁니다.
-              const baseFontSize = pos.pointSize != null ? pos.pointSize : TEXT_EMPHASIS_SIZE[mode][emphasis];
-              const fontSizePx = compact ? baseFontSize * COMPACT_SIZE_SCALE : baseFontSize;
-              const Icon = showContactIcon ? FIELD_ICON[key] : null;
-              // 2026-08-01: 이제 "지금 안내 중인 항목"만이 아니라 실제 내용이 있는
-              // 요소는 전부 눌러서 바로 선택+이동할 수 있습니다(isSelectable). 그중에서도
-              // interactiveKind와 같은 것만 "지금 안내 문구가 가리키는 항목"으로 진하게
-              // 강조합니다(isActive) — 나머지도 흐리게 죽이지 않고 옅은 점선으로만 "이것도
-              // 누르면 움직일 수 있다"는 힌트만 줍니다.
-              const isSelectable = !!onDragKindMove && !isMobileFallback;
-              const isActive = isSelectable && key === interactiveKind;
-              return {
-                key, pos, displayText, x, y, isLogo, align, translateX, valign, translateY,
-                logoSize, fontDef, fontSizePx, Icon, isSelectable, isActive,
-              };
-            }).filter(Boolean);
-
-            // 다음 pointermove 이벤트(handleDragPointerMove)에서 정렬 스냅을 계산할 때
-            // 쓸 수 있도록, 이번 렌더의 모든 요소 좌표를 캐시해둡니다.
-            elementGeomsRef.current = elements.map((el) => ({ key: el.key, x: el.x, y: el.y, align: el.align, valign: el.valign }));
-
-            // 2026-08-01: 지금 드래그 중인 요소가 다른 요소와 "같은 정렬 방식 + 좌표가
-            // 아주 가까움"이면 빨간 점선 가이드를 보여줍니다(포토샵 스마트 가이드 방식).
-            const activeEl = isDragging ? elements.find((el) => el.isActive) : null;
-            const guideX = activeEl && elements.some((el) => el.key !== activeEl.key && el.align === activeEl.align && Math.abs(el.x - activeEl.x) < GUIDE_SNAP_THRESHOLD_PCT) ? activeEl.x : null;
-            const guideY = activeEl && elements.some((el) => el.key !== activeEl.key && el.valign === activeEl.valign && Math.abs(el.y - activeEl.y) < GUIDE_SNAP_THRESHOLD_PCT) ? activeEl.y : null;
-
-            return (
-              <>
-                {elements.map((el) => {
-                  const { key, pos, displayText, x, y, isLogo, align, translateX, valign, translateY, logoSize, fontDef, fontSizePx, Icon, isSelectable, isActive } = el;
-                  return (
-                    <div
-                      key={key}
-                      onPointerDown={isSelectable ? (e) => handleDragPointerDown(e, key) : undefined}
-                      onPointerMove={isSelectable ? (e) => handleDragPointerMove(e, key) : undefined}
-                      onPointerUp={isSelectable ? (e) => handleDragPointerUp(e, key) : undefined}
-                      onPointerCancel={isSelectable ? (e) => handleDragPointerUp(e, key) : undefined}
-                      style={{
-                        position: "absolute", left: `${x}%`, top: `${y}%`,
-                        transform: `translate(${translateX}, ${translateY})`,
-                        display: "flex",
-                        flexDirection: align === "right" ? "row-reverse" : "row",
-                        alignItems: "center",
-                        justifyContent: isLogo ? "center" : "flex-start",
-                        gap: 4,
-                        transition: "outline-color 0.15s",
-                        ...(isSelectable
-                          ? {
-                              cursor: "grab", touchAction: "none", userSelect: "none",
-                              // 2026-08-01(개정): kind마다 다른 색 대신, "선택된 것 = 파란 테두리"
-                              // 하나로 통일했습니다. 선택 안 된 나머지는 옅은 회색 점선으로
-                              // "이것도 눌러서 옮길 수 있다"는 힌트만 줍니다.
-                              outline: isActive
-                                ? `2px solid ${SELECTED_ACCENT_COLOR}`
-                                : "1px dashed rgba(0,0,0,0.18)",
-                              outlineOffset: 4,
-                              borderRadius: isLogo ? (compact ? 2 : 5) : 6,
-                            }
-                          : {}),
-                        ...(isLogo
-                          ? {
-                              width: `${LOGO_SIZE_PERCENT[mode][logoSize]}%`, aspectRatio: "1 / 1",
-                              background: logoUrl ? "transparent" : resolveLogoColor(logoColor),
-                              // 로고가 배경색과 비슷한 톤일 때 완전히 안 보이는 걸 막는 최소한의
-                              // 안전장치 — 옅은 테두리를 항상 둡니다(업로드 이미지가 있을 땐 필요 없음).
-                              border: logoUrl ? "none" : "1px solid rgba(0,0,0,0.18)",
-                              borderRadius: compact ? 2 : 5, overflow: "hidden",
-                            }
-                          : {
-                              fontSize: fontSizePx, fontWeight: fontDef.weight, fontFamily: fontDef.family,
-                              color: (pos.overlay || needsLightText) ? "#fff" : "var(--ink)",
-                              textShadow: (pos.overlay || needsLightText) ? "0 1px 4px rgba(0,0,0,0.55)" : "none",
-                              whiteSpace: "nowrap", lineHeight: 1.2,
-                              textAlign: align === "left" ? "left" : align === "right" ? "right" : "center",
-                            }),
-                      }}
-                    >
-                      {isLogo ? (
-                        // CP-003: 업로드한 로고는 원본 그대로(object-fit: contain, 비율 유지) 표시 — AI가 재창작하거나 늘리지 않음
-                        logoUrl && <img src={logoUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", pointerEvents: "none" }} />
-                      ) : (
-                        <>
-                          {Icon && !compact && <Icon size={fontSizePx * 0.8} color={(pos.overlay || needsLightText) ? "#fff" : "var(--ink-soft)"} />}
-                          <span style={{ pointerEvents: "none" }}>{displayText}</span>
-                        </>
-                      )}
-                      {isActive && (
-                        <>
-                          {/* 2026-08-01: "선택하면 0.5초 정도 부드럽게 빛나면 좋겠다"는 요청으로
-                              추가. isActive가 false→true로 바뀔 때마다 이 span이 새로
-                              mount되면서(조건부 렌더링) 아래 @keyframes 애니메이션이 매번
-                              처음부터 다시 재생됩니다 — 다른 요소를 눌러 선택을 옮길 때마다
-                              "지금 이걸 고르셨어요"가 눈에 보이는 파동으로 한 번 반짝입니다. */}
-                          <span
-                            aria-hidden="true"
-                            style={{
-                              position: "absolute", top: -4, left: -4, right: -4, bottom: -4,
-                              borderRadius: isLogo ? (compact ? 4 : 7) : 8,
-                              animation: "cardstudioSelectPulse 0.6s ease-out",
-                              pointerEvents: "none",
-                            }}
-                          />
-                          <span
-                            aria-hidden="true"
-                            style={{
-                              position: "absolute", top: -10, right: -10,
-                              width: 20, height: 20, borderRadius: "50%",
-                              background: SELECTED_ACCENT_COLOR, color: "#fff",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              fontSize: 11, boxShadow: "0 0 0 1.5px #fff", zIndex: 2, pointerEvents: "none",
-                            }}
-                          >
-                            ✥
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-                {/* 2026-08-01: 정렬 가이드 — 포토샵/일러스트레이터에서 다른 요소와 줄이
-                    맞을 때 뜨는 빨간 점선과 같은 방식입니다. 세로선은 "같은 정렬(왼쪽/
-                    오른쪽/가운데)끼리 x좌표가 거의 같음"을, 가로선은 "같은 정렬(위/아래/
-                    중앙)끼리 y좌표가 거의 같음"을 의미합니다. 안전영역 박스 전체에 걸쳐
-                    그려서 "이 줄에 맞춰졌다"는 걸 명확히 보여줍니다. */}
-                {guideX != null && (
-                  <div aria-hidden="true" style={{ position: "absolute", left: `${guideX}%`, top: 0, bottom: 0, width: 0, borderLeft: `1.5px dashed ${GUIDE_LINE_COLOR}`, pointerEvents: "none", zIndex: 6 }} />
-                )}
-                {guideY != null && (
-                  <div aria-hidden="true" style={{ position: "absolute", top: `${guideY}%`, left: 0, right: 0, height: 0, borderTop: `1.5px dashed ${GUIDE_LINE_COLOR}`, pointerEvents: "none", zIndex: 6 }} />
-                )}
-              </>
-            );
-          })()}
-
-          {/* QR Object v1.0: 화면에서 실제로 켜졌을 때만 렌더링. 크기는 DRS의 qrPosition.minSizePercent(스캔 가능 최소 크기) 규칙을 따릅니다. */}
-          {qrEnabled && (() => {
-            const { x, y } = resolveElementPosition("qr", { zone: "bottomRight" }, spec);
-            const size = getQrSizePercent(mode);
-            return (
-              <div style={{
-                position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-100%, -100%)",
-                width: `${size}%`, aspectRatio: "1 / 1", background: "var(--ink)", borderRadius: compact ? 2 : 4,
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                {!compact && <span style={{ color: "#fff", fontSize: 6, fontWeight: 800 }}>QR</span>}
-              </div>
-            );
-          })()}
+          <div style={{ fontSize: 12, fontWeight: 800, color: agreedTerms ? "var(--stamp)" : "#B45309", marginBottom: 6 }}>
+            {TEXTS.termsAgreementBoxTitle}
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <div style={{
+              width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0,
+              border: `1.5px solid ${agreedTerms ? "var(--stamp)" : "var(--line)"}`,
+              background: agreedTerms ? "var(--stamp)" : "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {agreedTerms && <Check size={12} color="#fff" />}
+            </div>
+            <span style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>{TEXTS.termsLogoLiabilityLabel}</span>
+          </div>
         </div>
+      </div>
+      <div style={{ padding: "8px 18px 18px" }}>
+        {validationMsg && (
+          <div style={{
+            fontSize: 12, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+            borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontWeight: 700, textAlign: "center",
+          }}>
+            {validationMsg}
+          </div>
+        )}
+        <PrimaryButton
+          looksDisabled={!order.depositor || !agreedTerms}
+          icon={CreditCard}
+          onClick={async () => {
+            // 2026-08-07: "체크박스를 못 찾아서 버튼이 안 눌린다"는 신고 반영 —
+            // 예전엔 조건이 안 맞으면 버튼 자체가 브라우저 disabled 상태라 눌러도
+            // 아무 반응이 없었습니다(React onClick조차 안 불림). 이제 버튼은 항상
+            // 눌리고, 조건이 안 맞으면 뭐가 문제인지 알려주고 그 위치로 화면을
+            // 이동시켜서 스스로 원인을 못 찾는 일이 없게 했습니다.
+            if (!order.depositor) {
+              setValidationMsg(TEXTS.paymentMissingDepositor);
+              depositorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+              depositorRef.current?.focus();
+              return;
+            }
+            if (!agreedTerms) {
+              setValidationMsg(TEXTS.paymentMissingAgreement);
+              termsBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+              setHighlightTerms(true);
+              setTimeout(() => setHighlightTerms(false), 1500);
+              return;
+            }
+            setValidationMsg("");
+            // 실제 서비스에서는 이 주문번호를 서버가 발급해야 합니다.
+            // 지금은 프론트엔드 프로토타입이라 임시로 생성하고, 새로고침 전까지는 값이 바뀌지 않도록 order 상태에 저장해둡니다.
+            const orderNo = `BC${Date.now().toString().slice(-8)}`;
+            patch({ orderNo });
+            // 2026-08-04: 예전에 여기 있던 window.storage 기록(orderByPhone)을 지웠습니다 —
+            // Home.jsx의 "내 주문 조회"가 이제 실제 서버를 조회하므로, 이 기록을 읽는
+            // 코드가 더 이상 없어서 그대로 두면 아무 효과 없이 개인정보만 남기는
+            // 죽은 코드였습니다. ⚠️ 다만 이 기록에만 있던 printFileSvg(인쇄파일)·
+            // specialOrderFile(특별회원 업로드 파일)은 서버 쪽에 아직 저장할 곳이
+            // 없어서, 지금은 재주문 시 "저장된 파일 그대로" 가져오는 기능 자체가
+            // 없습니다 — design_recipe가 있는 주문만 그 설계도로 다시 만들 수 있습니다
+            // (Supabase Storage 연동 전까지의 알려진 한계).
+            // 2026-08-04: 실제 서버(Render+Supabase)가 배포되면서 recordNewOrder가
+            // 진짜 데이터베이스에 저장합니다. 이 저장은 실패해도 결제 접수 자체를
+            // 막으면 안 되므로(서버가 잠깐 응답 없거나 일시적 오류가 나도 고객은
+            // 정상적으로 다음 화면으로 넘어가야 함), await 없이 그대로 흘려보냅니다.
+            recordNewOrder(orderNo, {
+              customerPhone: order.ship?.phone?.trim(), customerName: order.ship?.name || order.name,
+              categoryCode: category?.code, paperCode: order.paperCode, paperChoice: order.paperChoice,
+              options: order.selOptions, sets: order.sets, memberType: order.memberType,
+              amountTotal: grandTotal, depositorName: order.depositor, shipping: order.ship,
+              designRecipe: order.designRecipe || null,
+            }).catch((err) => console.error("관리자 주문 기록 저장 실패:", err));
+            // 이메일 발송 실패가 주문 접수 자체를 막으면 안 되므로, 실패해도 무시하고
+            // 화면은 그대로 진행합니다 — 관리자 알림이 안 갔다고 고객의 주문을 막는 건
+            // 우선순위가 거꾸로입니다.
+            // 첨부는 둘 중 하나입니다: AI로 디자인했으면 방금 만든 인쇄용 SVG,
+            // 특별회원이면 직접 올린 파일. 이제 결제만 되면 실제 인쇄 파일이 관리자
+            // 이메일로 갑니다 — 지금까지 없던, 가장 중요한 마지막 단계입니다.
+            const attachment = order.printFileSvg
+              ? { dataUrl: svgToDataUrl(order.printFileSvg) }
+              : (order.specialOrderFile || null);
+            sendOrderNotificationEmail(order, orderNo, {
+              categoryName: category?.name, paperName: paper?.name,
+              optionsSummary: optLines.length ? optLines.join(", ") : null,
+              totalPrice: grandTotal,
+            }, attachment).catch((err) => console.error("주문 알림 이메일 발송 실패:", err));
+            go("complete");
+          }}
+        >
+          {TEXTS.paymentSubmitBtn}
+        </PrimaryButton>
       </div>
     </div>
   );
+}
+
+// ==================== data/categories ====================
+// printSides: 양면인쇄 옵션 제공 여부 / numbering: 넘버링 옵션 제공 여부 / onlyOptions: 이 코드만 사용 가능한 옵션 목록(제한이 없으면 생략)
+const CATEGORIES = [
+  { code: "cat01", name: "빠른명함", tagline: "당일 제작", icon: Zap, iconBg: "#EDEAFD", iconFg: "#6C4CF0", note: null, printSides: true, numbering: true },
+  { code: "cat02", name: "프리미엄명함", tagline: "고급 수입지", icon: Crown, iconBg: "#FDF0DC", iconFg: "#DB9E1E", note: null, printSides: true, numbering: true },
+  { code: "cat03", name: "스페셜명함", tagline: "유포 · 벨벳 · 펄", icon: Gem, iconBg: "#E5F7EC", iconFg: "#22B573", note: null, printSides: true, numbering: true },
+  { code: "cat04", name: "카드명함", tagline: "PVC · 투명", icon: CreditCard, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "귀도리 옵션만 가능", printSides: true, numbering: true, onlyOptions: ["OPT002"] },
+  { code: "cat05", name: "에폭시명함", tagline: "에폭시 코팅", icon: Star, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "넘버링·양면 불가", printSides: false, numbering: false },
+  { code: "cat06", name: "박명함", tagline: "금박 · 은박", icon: Award, iconBg: "#FCE8EE", iconFg: "#E63A6B", note: "넘버링·양면 불가", printSides: false, numbering: false },
+];
+
+// ==================== domain/company/emailVerification ====================
+// ====================================================================
+// Domain : Company / Email Verification
+// Responsibility : 회사 이메일 소유 여부를 실제로 증명하는 절차 (도메인 문자열
+//                  일치만으로는 증명이 안 됨 — 누구나 타이핑만으로 남의 회사
+//                  이메일을 입력할 수 있기 때문에, 그 메일함에 실제로 접근
+//                  권한이 있는지 인증코드로 확인합니다).
+//
+// 아래 세 값은 전부 실제로 확인된 값입니다(2026-07-29): SERVICE_ID는 orderNotification.js
+// 와 같은 계정, TEMPLATE_ID는 "One-Time Password" 템플릿(변수: to_email/verification_code
+// 확인됨), PUBLIC_KEY도 EmailJS 대시보드에서 직접 확인. 이제 자리표시자가 아닙니다.
+// ====================================================================
+const EMAILJS_SERVICE_ID = "service_c48f848";
+const EMAILJS_VERIFY_TEMPLATE_ID = "template_zbv0idi";
+const EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+
+const CODE_LENGTH = 6;
+const CODE_VALID_MS = 5 * 60 * 1000; // 5분
+
+function generateVerificationCode() {
+  const min = 10 ** (CODE_LENGTH - 1);
+  const max = 10 ** CODE_LENGTH - 1;
+  return String(Math.floor(min + Math.random() * (max - min + 1)));
+}
+
+// EmailJS REST API로 직접 POST — SDK를 새로 설치하지 않아도 되도록 fetch만 사용합니다.
+// (getStyleSuggestion이 Anthropic API를 fetch로 직접 호출하는 것과 같은 방식)
+async function sendVerificationEmail(email, code) {
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_VERIFY_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      template_params: { to_email: email, verification_code: code },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`이메일 발송 실패 (${res.status})`);
+  }
+}
+
+// 사용자가 입력한 코드가 실제로 보낸 코드와 일치하고, 유효시간 안인지 확인.
+function checkVerificationCode(inputCode, sentCode, sentAt) {
+  if (!sentCode || !sentAt) return { ok: false, reason: "not_sent" };
+  if (Date.now() - sentAt > CODE_VALID_MS) return { ok: false, reason: "expired" };
+  if (inputCode !== sentCode) return { ok: false, reason: "mismatch" };
+  return { ok: true };
 }
 
 // ==================== domain/company/companyResolver ====================
@@ -3363,341 +2925,1017 @@ function verifyCompanyEmail(email, company) {
   return company.emailDomains.includes(domain);
 }
 
-// ==================== domain/export/cardFileExporter ====================
-// ====================================================================
-// Domain : Export / Card File Exporter
-// Version : 1.0 (신규 — 가장 중요한 공백을 메우는 파일)
-// Responsibility : 화면에 그려지는 미리보기(CardLayoutPreview)를 실제 인쇄에 쓸 수 있는
-//                  파일로 변환합니다. 지금까지 이 앱은 결제까지는 완벽했지만, "AI가
-//                  디자인한 명함을 실제 파일로 뽑아내는" 마지막 단계가 없었습니다 —
-//                  그게 없으면 인쇄소에 넘길 게 아무것도 없다는 지적이 정확했습니다.
-//
-// 왜 PNG나 PDF가 아니라 SVG인가:
-//   이 환경(브라우저)에서 실제로 만들 수 있는 도구 중, 별도 라이브러리 설치 없이
-//   벡터(글자가 확대해도 안 깨지는) 파일을 만들 수 있는 유일한 방법이 SVG입니다.
-//   SVG는 width/height를 "mm" 단위로 직접 지정할 수 있어서, 실물 명함 크기(예:
-//   90mm x 50mm)를 그대로 표현하는 진짜 물리적 치수의 파일이 됩니다 — 화면 픽셀을
-//   흉내 낸 이미지가 아니라, 인쇄소가 실제로 열어서 쓸 수 있는 벡터 원고입니다.
-//   대부분의 인쇄소·에디터(일러스트레이터, Inkscape 등)가 SVG를 직접 엽니다.
-//
-// 정직하게 밝히는 한계:
-//   - CMYK 색공간 변환은 안 합니다(SVG는 RGB로 정의됩니다) — 실제 인쇄 시 색상이
-//     미세하게 다르게 나올 수 있고, 이건 결제 화면에 안내 문구로 남겨야 합니다.
-//   - 재단선·눈금(크롭 마크)은 이 버전에 없습니다 — 안전영역·재단선 좌표 자체는
-//     정확하지만, 인쇄소가 요구하는 크롭마크 표시는 필요해지면 추가해야 합니다.
-//   - pt(포인트) 크기는 여기서는 실제 물리 단위(1pt = 0.3527778mm)로 정확히
-//     환산합니다 — 화면 미리보기(CardLayoutPreview)의 pt는 "표시상의 상대 크기"였지만,
-//     이 파일은 실제로 인쇄될 원고라 정확한 환산이 필요하고, 여기서 처음 제대로 합니다.
-// ====================================================================
+// ==================== screens/Admin ====================
+// 아주 가벼운 비밀번호 게이트입니다 — 진짜 권한 시스템(관리자 계정 로그인)이 아닙니다.
+// 실제 서비스에서는 Auth 화면의 관리자 로그인과 연결해야 합니다. 지금은 프로토타입이라
+// 브라우저에 하드코딩된 값과 비교만 합니다 — 이 비밀번호는 보안 장치가 아니라
+// "일반회원이 실수로 들어오는 것"을 막는 정도의 문턱입니다.
+// 2026-08-04: 비밀번호 확인이 이제 서버(Render)에서 이뤄집니다 — 여기 있던 하드코딩된
+// 값은 더 이상 안 쓰입니다. 실제 관리자 비밀번호는 Render 환경변수 ADMIN_PASSWORD에
+// 있습니다.
 
+function Admin({ go, back }) {
+  const [authed, setAuthed] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [companies, setCompanies] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  // 2026-08-04: 실제 서버 로그인이 되면서 추가 — 서버가 발급한 서명된 토큰을 여기
+  // 담아둡니다(브라우저를 새로고침하면 사라짐 — 이 미리보기 환경에선 localStorage를
+  // 못 쓰기 때문에 의도적으로 메모리에만 둡니다. 그래서 새로고침하면 재로그인 필요,
+  // 이건 이전(비밀번호만 확인) 방식과 동일한 제약입니다).
+  const [adminToken, setAdminToken] = useState(null);
+  const [loginBusy, setLoginBusy] = useState(false);
+  // 2026-08-02: 이 두 줄은 원래 아래 "if (!authed) return (...)" 다음에 있었습니다 —
+  // 그러면 로그인 전(authed=false)에는 이 useState들이 아예 호출이 안 되고, 로그인
+  // 후(authed=true)에만 호출되어서 같은 컴포넌트인데 렌더마다 훅 호출 개수가
+  // 달라지는 문제(Rules of Hooks 위반)가 있었습니다. 지금까지는 우연히 문제가
+  // 안 드러났을 수 있지만, 원칙대로 모든 훅은 조건 분기보다 위, 맨 앞에서
+  // 무조건 호출되어야 해서 여기로 옮겼습니다.
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [registerResult, setRegisterResult] = useState("");
+  // 2026-08-02: 관리자가 실제로 "입금확인"을 할 수 있는 기능 — 주문 목록 상태.
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [busyOrderNo, setBusyOrderNo] = useState(null);
 
+  useEffect(() => {
+    if (!authed) return;
+    (async () => {
+      await loadCompanyLibrary(); // 이전 세션에 저장된 것들까지 다 불러온 뒤에 목록을 만듭니다.
+      setCompanies([...COMPANY_DOMAIN]);
+      setLoading(false);
+    })();
+  }, [authed]);
 
+  const refreshOrders = async () => {
+    setOrdersLoading(true);
+    try {
+      setOrders(await listOrders(adminToken));
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (!authed) return;
+    refreshOrders();
+  }, [authed]);
 
+  const handleConfirmDeposit = async (orderNo) => {
+    setBusyOrderNo(orderNo);
+    try {
+      await confirmDeposit(orderNo, adminToken);
+      await refreshOrders();
+    } catch (err) {
+      console.error("입금확인 처리 실패:", err);
+    } finally {
+      setBusyOrderNo(null);
+    }
+  };
 
-const PT_TO_MM = 0.3527778;
-// 기존 emphasis(lg/md/sm) 기반 레이아웃(예: 사진형이 아직 patternSelections 없이 쓰일 때)은
-// pointSize가 없으므로, kernel/designRules.js의 TEXT_EMPHASIS_SIZE.full 값을 그대로
-// pt로 간주합니다. 2026-08-01: 예전엔 이 파일에 { lg: 13, md: 10, sm: 8.5 }를 따로
-// 하드코딩해 놨었는데, 그러다 보니 미리보기(designRules.js)에서 글자 크기를 키워도
-// 실제 인쇄파일(이 파일)에는 반영이 안 되는 문제가 있었습니다. 이제 designRules.js를
-// 그대로 import해서 쓰므로 두 곳이 항상 같은 값을 씁니다.
-const EMPHASIS_PT_FALLBACK = TEXT_EMPHASIS_SIZE.full;
+  const refresh = () => setCompanies([...COMPANY_DOMAIN]);
 
-function escapeXml(str) {
-  return String(str).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
-}
+  const handleApprove = async (id) => {
+    setBusyId(id);
+    await updateCompanyStatus(id, "verified", { approvedBy: "admin", token: adminToken });
+    refresh();
+    setBusyId(null);
+  };
 
-function textFor(key, fields, nameEnglish) {
-  if (key === "company") return fields?.["companyName"] || "회사명";
-  if (key === "position") return fields?.["position"] || "직위";
-  if (key === "personName") {
-    const base = fields?.["personName"] || "성명";
-    return nameEnglish?.trim() ? `${base} (${nameEnglish.trim()})` : base;
+  const handleReject = async (id) => {
+    setBusyId(id);
+    await removeCompany(id, adminToken);
+    refresh();
+    setBusyId(null);
+  };
+
+  if (!authed) {
+    return (
+      <div className="app-body">
+        <TopBar title={TEXTS.adminLoginTitle} onBack={back} go={go} />
+        <div style={{ padding: "16px 18px" }}>
+          <input
+            style={inputStyle}
+            type="password"
+            placeholder={TEXTS.adminPasswordPlaceholder}
+            value={passwordInput}
+            onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(""); }}
+          />
+          {passwordError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 8 }}>{passwordError}</div>}
+          <div style={{ marginTop: 14 }}>
+            <PrimaryButton
+              disabled={!passwordInput || loginBusy}
+              onClick={async () => {
+                setLoginBusy(true);
+                setPasswordError("");
+                try {
+                  const token = await adminLogin(passwordInput);
+                  setAdminToken(token);
+                  setAuthed(true);
+                } catch (err) {
+                  setPasswordError(err.message || TEXTS.adminPasswordWrong);
+                } finally {
+                  setLoginBusy(false);
+                }
+              }}
+            >
+              {TEXTS.adminLoginBtn}
+            </PrimaryButton>
+          </div>
+        </div>
+      </div>
+    );
   }
-  if (key === "mobile") return fields?.mobile?.trim() || null;
-  if (key === "telephoneFax") {
-    const tel = fields?.telephone?.trim();
-    const fax = fields?.fax?.trim();
-    if (tel && fax) return `${tel} · Fax ${fax}`;
-    if (tel) return tel;
-    if (fax) return `Fax ${fax}`;
-    return null;
-  }
-  if (key === "address") return fields?.address?.trim() || null;
-  if (key === "email") return fields?.email?.trim() || null;
-  if (key === "website") return fields?.website?.trim() || null;
-  if (key === "etc") return fields?.etc?.trim() || null;
-  return "";
+
+  const handleRegister = async (formData) => {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(formData.file);
+    });
+    const splitList = (str) => str.split(",").map((s) => s.trim()).filter(Boolean);
+    const result = await registerCompany({
+      name: formData.name,
+      aliases: splitList(formData.aliases),
+      logo: dataUrl,
+      logoType: formData.logoType,
+      industry: formData.industry || null,
+      homepage: formData.homepage || null,
+      officialLogoUrl: formData.officialLogoUrl || null,
+      emailDomains: splitList(formData.emailDomains),
+      source: "admin_registered", // 관리자가 직접 등록 → 기본 status: verified, qualityGrade: B
+    });
+    refresh();
+    if (result.registered) {
+      setRegisterResult(TEXTS.adminRegisterSuccess(result.company.name));
+      setShowRegisterForm(false);
+    } else if (result.mergedAlias) {
+      setRegisterResult(TEXTS.adminRegisterMerged(result.company.name));
+    } else {
+      setRegisterResult(TEXTS.adminRegisterDuplicate(result.company.name));
+    }
+  };
+
+  const pending = companies.filter((c) => c.status === "pending");
+  const others = companies.filter((c) => c.status !== "pending");
+
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.adminReviewTitle} onBack={back} go={go} />
+      <div style={{ padding: "16px 18px" }}>
+        {/* 2026-08-02 신규: 실제로 입금확인을 처리할 수 있는 주문 관리 섹션.
+            ⚠️ 지금은 Complete.jsx(고객이 보는 화면)가 아직 이 실제 상태를 안 읽고
+            예전 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 테스트 흐름이 막히지
+            않게 하기 위한 의도적 선택입니다. 실 서비스 전환 전 반드시 연결할 것
+            (PROJECT_HANDOFF.md에 기록됨). */}
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
+          {TEXTS.adminOrdersSectionTitle} ({orders.filter((o) => o.status !== ORDER_STATUS.CONFIRMED).length})
+        </div>
+        {ordersLoading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
+        {!ordersLoading && orders.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoOrders}</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {orders.map((o) => {
+            const confirmed = o.status === ORDER_STATUS.CONFIRMED;
+            return (
+              <Card key={o.orderNo}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{o.orderNo}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 3 }}>{TEXTS.adminOrderDepositorLine(o.depositor, o.categoryName)}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.adminOrderAmountLine(o.grandTotal)}</div>
+                  </div>
+                  <div style={{
+                    fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, flexShrink: 0,
+                    color: confirmed ? "var(--stamp)" : "#B45309",
+                    background: confirmed ? "rgba(108,76,240,0.1)" : "#FEF3C7",
+                  }}>
+                    {o.status}
+                  </div>
+                </div>
+                {!confirmed && (
+                  <button
+                    disabled={busyOrderNo === o.orderNo}
+                    onClick={() => handleConfirmDeposit(o.orderNo)}
+                    style={{
+                      width: "100%", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)",
+                      color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+                    }}
+                  >
+                    <Check size={14} /> {TEXTS.adminConfirmDepositBtn}
+                  </button>
+                )}
+                {confirmed && o.confirmedAt && (
+                  <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6 }}>
+                    {TEXTS.adminApprovalRecord(o.confirmedBy || "admin", o.confirmedAt)}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* 이메일 발송 자체(EmailJS 연동)가 되는지 회사 인증 절차 없이 확인하는
+            관리자 전용 도구. 회사메일이 없어도 테스트할 수 있게 해주던 "테스트회사"
+            (gmail.com) 항목은 이제 지웠습니다 — verifyCompanyEmail이 개인 이메일
+            도메인을 아예 거부하도록 막아서 그 방법 자체가 더 안 통합니다. 대신 여기서는
+            회사 인증 로직을 거치지 않고 sendVerificationEmail을 직접 호출하기 때문에,
+            보안 구멍을 만들지 않으면서 "발송이 실제로 되는가"만 확인할 수 있습니다.
+            이미 관리자 비밀번호로 접근이 막혀있는 화면이라 안전합니다. */}
+        <EmailSendTestTool />
+        <div style={{ marginBottom: 20 }}>
+          <button
+            onClick={() => { setShowRegisterForm((v) => !v); setRegisterResult(""); }}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: showRegisterForm ? "var(--stamp)" : "var(--paper-white)", color: showRegisterForm ? "#fff" : "var(--stamp)", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+          >
+            {showRegisterForm ? TEXTS.adminRegisterCloseBtn : TEXTS.adminRegisterOpenBtn}
+          </button>
+          {showRegisterForm && <RegisterForm onSubmit={handleRegister} />}
+          {registerResult && <div style={{ fontSize: 12, color: "var(--stamp)", marginTop: 8 }}>{registerResult}</div>}
+        </div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
+          {TEXTS.adminPendingSectionTitle} ({pending.length})
+        </div>
+        {loading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
+        {!loading && pending.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoPending}</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {pending.map((c) => (
+            <Card key={c.id}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                {c.logo && (
+                  <img src={c.logo} alt="" style={{ width: 48, height: 48, objectFit: "contain", background: "var(--paper-deep)", borderRadius: 8, flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.name} <span style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 700 }}>{c.qualityGrade}등급</span></div>
+                  <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.adminSourceLabel(c.source)}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  disabled={busyId === c.id}
+                  onClick={() => handleApprove(c.id)}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)", color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+                >
+                  <Check size={14} /> {TEXTS.adminApproveBtn}
+                </button>
+                <button
+                  disabled={busyId === c.id}
+                  onClick={() => handleReject(c.id)}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--line)", background: "var(--paper-white)", color: "#d64545", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+                >
+                  <X size={14} /> {TEXTS.adminRejectBtn}
+                </button>
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        {others.length > 0 && (
+          <>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.adminOthersSectionTitle}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {others.map((c) => (
+                <div key={c.id} style={{ display: "flex", flexDirection: "column", padding: "8px 4px", fontSize: 12, borderBottom: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>{c.name}</span>
+                    <span style={{ color: "var(--ink-soft)" }}>{c.status}</span>
+                  </div>
+                  {c.approvedBy && (
+                    <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 2 }}>
+                      {TEXTS.adminApprovalRecord(c.approvedBy, c.approvedAt)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
-// CardLayoutPreview.jsx와 정확히 같은 규칙(임계값 기반 정렬)을 씁니다 — 미리보기와
-// 실제 파일이 서로 다른 위치로 나오면 "본 것과 다르게 인쇄됐다"는 신뢰 문제가 생기므로,
-// 여기 계산은 renderer/CardLayoutPreview.jsx의 로직과 반드시 같게 유지해야 합니다.
-function alignFor(x) {
-  return x <= DESIGN_RULES.alignment.leftThreshold ? "left" : x >= DESIGN_RULES.alignment.rightThreshold ? "right" : "center";
-}
-function valignFor(y) {
-  return y <= DESIGN_RULES.alignment.leftThreshold ? "top" : y >= DESIGN_RULES.alignment.rightThreshold ? "bottom" : "middle";
+// 관리자 전용, 회사 인증 로직 없이 EmailJS 발송 자체만 테스트합니다.
+function EmailSendTestTool() {
+  const [testEmail, setTestEmail] = useState("");
+  const [status, setStatus] = useState(null); // null | "sending" | "sent" | "error"
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleTestSend = async () => {
+    setStatus("sending");
+    setErrorMsg("");
+    try {
+      const code = generateVerificationCode();
+      await sendVerificationEmail(testEmail, code);
+      setStatus("sent");
+    } catch (err) {
+      setStatus("error");
+      setErrorMsg(err.message || String(err));
+    }
+  };
+
+  return (
+    <Card style={{ marginBottom: 20, background: "var(--paper-deep)", border: "none" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.adminEmailTestTitle}</div>
+      <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>{TEXTS.adminEmailTestDesc}</div>
+      <input
+        style={inputStyle}
+        type="email"
+        placeholder={TEXTS.adminEmailTestPlaceholder}
+        value={testEmail}
+        onChange={(e) => { setTestEmail(e.target.value); setStatus(null); }}
+      />
+      <div style={{ marginTop: 10 }}>
+        <PrimaryButton disabled={!testEmail || status === "sending"} onClick={handleTestSend}>
+          {status === "sending" ? TEXTS.adminEmailTestSending : TEXTS.adminEmailTestBtn}
+        </PrimaryButton>
+      </div>
+      {status === "sent" && <div style={{ fontSize: 11.5, color: "var(--stamp)", marginTop: 8, fontWeight: 600 }}>{TEXTS.adminEmailTestSuccess}</div>}
+      {status === "error" && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 8 }}>{TEXTS.adminEmailTestFail}: {errorMsg}</div>}
+    </Card>
+  );
 }
 
-function buildCardSVG({
-  templateName, photoVariant, showLogo = true, fields, cardSize, patternSelections = null,
-  fontFamilyId = null, backgroundStyle = "white", logoColor = null, logoDataUrl = null,
-  nameEnglish = "", showContactIcon = true, qrEnabled = false, orientation = null,
-}) {
-  // 2026-08-01: 미리보기와 마찬가지로, 명시적으로 고른 orientation이 있으면 그걸
-  // 그대로 쓰고(가로형/세로형을 직접 고를 수 있게 됐으므로), 없을 때만 예전처럼
-  // 사진 상단형/하단형 여부로 자동 추정합니다.
-  const spec = getCardSpec(cardSize, orientation || (isPortraitPhotoVariant(templateName, photoVariant) ? "portrait" : "landscape"));
-  const workingW = spec.trimWidth + spec.bleed * 2;
-  const workingH = spec.trimHeight + spec.bleed * 2;
-  const safeWidthMm = spec.trimWidth - spec.safeMargin * 2;
-  const safeHeightMm = spec.trimHeight - spec.safeMargin * 2;
-  const safeOriginXMm = spec.bleed + spec.safeMargin;
-  const safeOriginYMm = spec.bleed + spec.safeMargin;
+// 관리자가 새 회사를 직접 등록하는 폼. registerCompany()를 호출하는 유일한
+// "관리자 등록" 진입점입니다 — 계약회원/일반회원 업로드는 Design.jsx 쪽에서
+// 이미 registerCompany()를 호출하고 있어서 여기서는 admin_registered 경로만 담당합니다.
+function RegisterForm({ onSubmit }) {
+  const [name, setName] = useState("");
+  const [aliases, setAliases] = useState("");
+  const [logoType, setLogoType] = useState(COMPANY_LOGO_TYPES.CORPORATE);
+  const [industry, setIndustry] = useState("");
+  const [homepage, setHomepage] = useState("");
+  const [officialLogoUrl, setOfficialLogoUrl] = useState("");
+  const [emailDomains, setEmailDomains] = useState("");
+  const [file, setFile] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
+  const canSubmit = name.trim() && file && !submitting;
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      await onSubmit({ name: name.trim(), aliases, logoType, industry, homepage, officialLogoUrl, emailDomains, file });
+      setName(""); setAliases(""); setIndustry(""); setHomepage(""); setOfficialLogoUrl(""); setEmailDomains(""); setFile(null);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card style={{ marginTop: 10 }}>
+      <Field label={TEXTS.adminFormNameLabel}>
+        <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={TEXTS.adminFormNamePlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormAliasesLabel}>
+        <input style={inputStyle} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={TEXTS.adminFormAliasesPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormLogoTypeLabel}>
+        <select style={inputStyle} value={logoType} onChange={(e) => setLogoType(e.target.value)}>
+          {Object.values(COMPANY_LOGO_TYPES).map((t) => (
+            <option key={t} value={t}>{TEXTS.adminLogoTypeLabel(t)}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label={TEXTS.adminFormIndustryLabel}>
+        <input style={inputStyle} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder={TEXTS.adminFormIndustryPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormHomepageLabel}>
+        <input style={inputStyle} value={homepage} onChange={(e) => setHomepage(e.target.value)} placeholder={TEXTS.adminFormHomepagePlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormOfficialLogoUrlLabel}>
+        <input style={inputStyle} value={officialLogoUrl} onChange={(e) => setOfficialLogoUrl(e.target.value)} placeholder={TEXTS.adminFormOfficialLogoUrlPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormEmailDomainsLabel}>
+        <input style={inputStyle} value={emailDomains} onChange={(e) => setEmailDomains(e.target.value)} placeholder={TEXTS.adminFormEmailDomainsPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormLogoFileLabel}>
+        <UploadBox label={TEXTS.adminFormLogoFileLabel} icon={Upload} done={!!file} fileName={file?.name} onFile={setFile} accept=".png,.jpg,.jpeg,.svg" />
+      </Field>
+      <PrimaryButton disabled={!canSubmit} onClick={handleSubmit}>
+        {submitting ? TEXTS.adminFormSubmitting : TEXTS.adminFormSubmitBtn}
+      </PrimaryButton>
+    </Card>
+  );
+}
+
+// ==================== screens/Complete ====================
+const ORDER_STAGES = [
+  { k: "주문접수", icon: Check },
+  { k: "입금대기", icon: Landmark },
+  { k: "입금확인", icon: Check },
+  { k: "인쇄중", icon: Printer },
+  { k: "인쇄완료", icon: Package },
+  { k: "배송", icon: Truck },
+];
+
+function Complete({ order, go, grandTotal, category }) {
+  const orderNo = order.orderNo || "-";
+  const [stage, setStage] = useState(0);
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.completeTitle} step={7} />
+      <div style={{ padding: "10px 18px 16px" }}>
+        <Card style={{ textAlign: "center", padding: "22px 16px", marginBottom: 14 }}>
+          <div style={{
+            width: 54, height: 54, borderRadius: "50%", background: "var(--stamp)", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px",
+            transform: "rotate(-6deg)",
+          }}>
+            <Check size={26} />
+          </div>
+          <div className="serif" style={{ fontSize: 16, fontWeight: 900 }}>{TEXTS.completeHeadline}</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.orderNoLabel} {orderNo}</div>
+          <div style={{ fontSize: 18, fontWeight: 900, color: "var(--stamp)", marginTop: 10 }}>{won(grandTotal)}</div>
+        </Card>
+
+        {order.fileStorageNotice && (
+          <div style={{
+            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+            borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
+          }}>
+            {order.fileStorageNotice}
+          </div>
+        )}
+
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 14 }}>{TEXTS.orderStatusTitle}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", position: "relative" }}>
+            <div style={{ position: "absolute", top: 15, left: 20, right: 20, height: 1.5, background: "var(--line)" }} />
+            <div style={{ position: "absolute", top: 15, left: 20, height: 1.5, background: "var(--stamp)", width: `${(stage / (ORDER_STAGES.length - 1)) * 100}%`, maxWidth: "calc(100% - 40px)" }} />
+            {ORDER_STAGES.map((s, i) => {
+              const Icon = s.icon;
+              const active = i <= stage;
+              return (
+                <div key={s.k} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1, flex: 1 }}>
+                  <div style={{
+                    width: 30, height: 30, borderRadius: "50%", background: active ? "var(--stamp)" : "var(--paper-white)",
+                    border: `1.5px solid ${active ? "var(--stamp)" : "var(--line)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Icon size={14} color={active ? "#fff" : "var(--ink-soft)"} />
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: active ? "var(--ink)" : "var(--ink-soft)" }}>{s.k}</div>
+                </div>
+              );
+            })}
+          </div>
+          {stage < ORDER_STAGES.length - 1 && (
+            <button onClick={() => setStage((s) => Math.min(ORDER_STAGES.length - 1, s + 1))} style={{ ...stepperBtn, width: "100%", marginTop: 16, fontSize: 11.5, fontWeight: 700 }}>
+              {TEXTS.orderStatusPreviewBtn}
+            </button>
+          )}
+        </Card>
+
+        <Card>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{TEXTS.orderDetailsTitle}</div>
+          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
+          <SummaryRow k={TEXTS.orderNoLabel} v={orderNo} />
+        </Card>
+      </div>
+      <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <PrimaryButton onClick={() => go("home")}>{TEXTS.goHomeBtn}</PrimaryButton>
+        <button
+          onClick={() => go("inquiry")}
+          style={{
+            width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
+            borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit",
+          }}
+        >
+          {TEXTS.inquiryBtn}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ==================== data/papers ====================
+const PAPERS = [
+  // 2026-08-02: "빠른스노우250g는 옵션을 받으면 안 된다"는 요청 반영 — 익일출고를
+  // 위해 인쇄방식(단면/양면)만 고를 수 있고, 귀도리·타공·오시·미싱·넘버링 같은
+  // 시간이 걸리는 옵션은 아예 못 고르게 막습니다(data/options.js의 availableOptions
+  // 참고). 옵션이 필요하면 pa002(스노우지250g, "빠른" 없음)로 안내합니다.
+  { code: "pa001", cat: "cat01", name: "빠른스노우250g", sheets: 500, base: 4620, general: 14000, special: 5590, desc: "당일제작가능", restrictedOptions: true },
+  { code: "pa002", cat: "cat01", name: "스노우지250g", sheets: 500, base: 4620, general: 14000, special: 5590, choice: "무광코팅,코팅없음", desc: "코팅없음은 넘버링가능(450매,기준가40,000원)" },
+  { code: "pa003", cat: "cat01", name: "스노우지300g", sheets: 200, base: 4620, general: 14000, special: 5590, choice: "무광코팅,유광코팅", desc: "고급스러운 광택 옵션 선택 가능", numbering: false },
+  { code: "pa004", cat: "cat02", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 박이나 에폭시가 잘 어울림" },
+  { code: "pa005", cat: "cat02", name: "반누보화이트204g", sheets: 200, base: 6050, general: 15000, special: 7321, desc: "부드럽고 따뜻한 질감의 고급지. 잉크가 은은하게 표현됨" },
+  { code: "pa006", cat: "cat02", name: "반누보스노우화이트227g", sheets: 200, base: 7050, general: 17000, special: 8531, desc: "반누보보다 더 밝고 깨끗한 느낌. 고급스럽고 차분함" },
+  { code: "pa007", cat: "cat02", name: "반누보화이트320g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "반누보 특유의 질감 + 두꺼운 프리미엄 느낌" },
+  { code: "pa008", cat: "cat02", name: "아르미울트라화이트230g", sheets: 300, base: 4620, general: 15000, special: 5590, desc: "무난한 기본형 고급지. 다양한 업종에 적합" },
+  { code: "pa009", cat: "cat02", name: "아르미울트라화이트310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "은은한 펄(광택) 효과가 있는 특수지. 고급스럽고 화려함" },
+  { code: "pa010", cat: "cat02", name: "엑스트라매트백색350g", sheets: 200, base: 8800, general: 19000, special: 10648, desc: "섬유 느낌이 살아있는 독특한 질감. 감성적인 분위기" },
+  { code: "pa011", cat: "cat02", name: "랑데뷰내추럴310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "가장 인기 있는 프리미엄 고급지. 부드럽고 따뜻한 감성" },
+  { code: "pa017", cat: "cat02", name: "아쿠아사틴256g", sheets: 200, base: 17600, general: 35200, special: 21296, desc: "미세한 패턴 질감이 있는 유럽풍 고급지" },
+  { code: "pa018", cat: "cat02", name: "인버코트350g", sheets: 200, base: 18700, general: 37400, special: 22627, desc: "반짝이는 펄 효과. 조명에서 고급스럽게 빛남" },
+  { code: "pa020", cat: "cat02", name: "베이직백색233g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "매우 부드러운 촉감. 감성 브랜드·카페 스타일에 적합" },
+  { code: "pa021", cat: "cat02", name: "스타드림쿼츠240g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "골드 펄 느낌이 나는 화려한 특수지" },
+  { code: "pa022", cat: "cat02", name: "린넨커버솔라화이트216g", sheets: 200, base: 6050, general: 17000, special: 7321, desc: "매우 두꺼운 최고급지. 고급 브랜드용 추천" },
+  { code: "pa024", cat: "cat02", name: "크리스탈펄화이트235g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "검정색 특수지. 금박/은박과 조합 시 매우 고급스러움" },
+  { code: "pa025", cat: "cat02", name: "매쉬멜로우화이트209g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "물에 강한 합성지. 찢어짐과 습기에 강함" },
+  { code: "pa026", cat: "cat02", name: "다이니티골드펄250g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "친환경 크라프트 느낌. 자연주의·수제 감성", numbering: false },
+  { code: "pa027", cat: "cat02", name: "에그쉘엑스트라화이트400g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "벨벳처럼 부드러운 촉감. 최고급 감성 명함" },
+  { code: "pa028", cat: "cat03", name: "매트블랙380g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "매우 두꺼운 합지 스타일. 존재감 강함", numbering: false },
+  { code: "pa029", cat: "cat03", name: "유포지FEB250", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "푸른빛 펄 효과의 화려한 특수지", numbering: false },
+  { code: "pa030", cat: "cat03", name: "뉴크라프트보드300g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "단단하고 깔끔한 초고급 백색지" },
+  { code: "pa031", cat: "cat03", name: "벨벳화이트359g", sheets: 200, base: 9900, general: 20000, special: 11979, desc: "은은한 골드톤 특수지. 고급스러운 분위기 강조", numbering: false },
+  { code: "pa032", cat: "cat03", name: "듀오화이트400g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "물에 젖지않는 고급스러움" },
+  { code: "pa033", cat: "cat03", name: "블루펄스타250g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "느껴지는 독특한 텍스추어" },
+  { code: "pa035", cat: "cat03", name: "키칼라아이스골드250g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "최상의 멋스러움" },
+  { code: "pa036", cat: "cat03", name: "아트지백색300g", sheets: 200, base: 8800, general: 20000, special: 10648, desc: "매끄럽고 인쇄 발색이 선명한 아트지", numbering: false },
+  { code: "pa037", cat: "cat04", name: "PET투명300", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa038", cat: "cat04", name: "Luxury카드명함화이트", sheets: 200, base: 12100, general: 24200, special: 14641, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa039", cat: "cat04", name: "Luxury카드명함실버", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa040", cat: "cat04", name: "Luxury카드명함골드", sheets: 200, base: 23100, general: 46200, special: 27951, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa041", cat: "cat05", name: "아르미울트라화이트230g", sheets: 300, base: 11000, general: 22000, special: 13310, desc: "무난한 기본형 고급지" },
+  { code: "pa043", cat: "cat05", name: "아쿠아사틴256g", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "미세한 패턴 질감의 유럽풍 고급지" },
+  { code: "pa045", cat: "cat05", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 에폭시가 잘 어울림" },
+  { code: "pa047", cat: "cat05", name: "반누보화이트204g", sheets: 200, base: 10450, general: 20900, special: 12645, desc: "부드럽고 따뜻한 질감의 고급지" },
+  { code: "pa051", cat: "cat06", name: "아르미울트라화이트230g", sheets: 300, base: 12650, general: 25300, special: 15307, choice: "금박유광,금박무광,은박유광,은박무광", desc: "무난한 기본형 고급지" },
+  { code: "pa052", cat: "cat06", name: "아르미울트라화이트310g", sheets: 200, base: 13000, general: 26000, special: 15730, choice: "금박유광,금박무광,은박유광,은박무광", desc: "은은한 펄 효과. 고급스럽고 화려함" },
+  { code: "pa055", cat: "cat06", name: "스노우지백색300g무광코팅", sheets: 200, base: 15620, general: 31240, special: 18900, choice: "금박유광,금박무광,은박유광,은박무광", desc: "백색위에 박이 잘 어울림" },
+  { code: "pa056", cat: "cat06", name: "반누보화이트204g", sheets: 200, base: 11550, general: 23100, special: 13976, choice: "금박유광,금박무광,은박유광,은박무광", desc: "부드럽고 따뜻한 질감의 고급지" },
+];
+
+// ==================== renderer/CardLayoutPreview ====================
+// 2026-08-01: "포토샵처럼 줄이 맞는지 비교해달라"는 요청으로 추가한 정렬 가이드용
+// 상수. 드래그 중인 요소가 다른 요소와 같은 정렬 방식(왼쪽-왼쪽/오른쪽-오른쪽/
+// 가운데-가운데, 위-위/아래-아래/중앙-중앙)으로 이 값(%) 이내로 가까워지면 빨간
+// 점선 가이드가 뜨고, 그 좌표로 살짝 자석처럼 붙습니다(스냅).
+const GUIDE_SNAP_THRESHOLD_PCT = 1.4;
+const GUIDE_LINE_COLOR = "#F5365C";
+
+function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = true, fields, compact, cardSize = CARD_SIZE_DEFAULT, qrEnabled = false, qrUrl = "", nameEnglish = "", showContactIcon = true, backgroundStyle = "white", logoColor = null, logoFile = null, patternSelections = null, fontFamilyId = null, interactiveKind = null, onDragKindMove = null, onSelectKind = null, orientation = null }) {
+  // patternSelections가 있으면(=사용자가 위치조정 화면에서 패턴을 직접 골랐으면) 그
+  // 조합으로 실시간 계산하고, 없으면 템플릿의 기본 배치(getLayoutFor)를 그대로 씁니다.
+  // 사진형도 이제 company/person/logo/연락처 항목들은 Pattern Library를 씁니다 — 다만
+  // 사진 자리(rect)는 patternLibrary가 다루지 않는 유일한 부분이라 따로 병합합니다.
   const photoRect = templateName === "사진형" ? (PHOTO_RECT_BY_VARIANT[photoVariant] || PHOTO_RECT_BY_VARIANT[PHOTO_TEMPLATES[0]]) : {};
   const layout = patternSelections
     ? { ...photoRect, ...buildLayoutFromPatterns(patternSelections, { overlay: templateName === "사진형" && !!PHOTO_TEMPLATE_PATTERN_SELECTIONS[photoVariant]?.overlay }) }
     : getLayoutFor(templateName, photoVariant);
-
+  // 2026-08-02: "사진형도 위치·크기를 옮길 수 있게 해달라"는 요청 반영 — 로고/텍스트와
+  // 같은 방식(mm 오프셋 누적 + 배율)으로 patternSelections에 저장해두고, 실제 그리는
+  // rect(%)는 매 렌더마다 기본값 + 이 값을 합쳐서 계산합니다.
+  const photoOffsetMm = patternSelections?.photoFineOffsetMm || { x: 0, y: 0 };
+  const photoScale = patternSelections?.photoScale || 1;
+  const mode = compact ? "compact" : "full";
+  // 2026-08-01: 이제 가로형/세로형을 사용자가 직접 고를 수 있어서(카드 모양 토글),
+  // 그 값(orientation prop)이 있으면 그대로 쓰고, 없을 때만(옛 호출부·아직 안 옮긴
+  // 곳) 사진 상단형/하단형 여부로 자동 추정하던 기존 방식으로 대체합니다.
+  const spec = getCardSpec(cardSize, orientation || (isPortraitPhotoVariant(templateName, photoVariant) ? "portrait" : "landscape"));
+  const effectivePhotoRect = layout.photo ? computeEffectivePhotoRect(layout.photo.rect, photoOffsetMm, photoScale, spec.trimWidth, spec.trimHeight) : null;
+  const safeXPct = (spec.safeMargin / spec.trimWidth) * 100;
+  const safeYPct = (spec.safeMargin / spec.trimHeight) * 100;
   const bgOption = BACKGROUND_STYLE_OPTIONS.find((b) => b.id === backgroundStyle);
+  const bgCss = bgOption?.css || "var(--paper-white)";
+  // 사진이 카드를 덮는 경우(overlay, 사진 배경형)뿐 아니라 짙은 배경색(gradient 등)을
+  // 골랐을 때도 흰 텍스트가 필요합니다 — 예전엔 overlay만 봐서, 짙은 배경을 고르면
+  // 어두운 글자가 거의 안 보이는 문제가 있었습니다.
   const needsLightText = bgOption?.dark === true;
+  // fontFamilyId는 문자열(전체 공통 서체) 또는 { company, person, default } 객체(요소별
+  // 서체) 둘 다 받습니다 — "상호 서체를 따로", "이름·직위 서체도 따로" 요청 반영.
+  // 문자열로 넘어오면(예전 호출 방식) 전부 같은 서체를 씁니다.
   const fontForKind = (kind) => {
-    const id = typeof fontFamilyId === "string" ? fontFamilyId : (fontFamilyId?.[kind] || fontFamilyId?.default);
+    const lookupKind = kind === "position" ? "personName" : kind; // 직위는 이름 서체 선택을 같이 씁니다(선택 UI가 하나뿐이라서)
+    const id = typeof fontFamilyId === "string" ? fontFamilyId : (fontFamilyId?.[lookupKind] || fontFamilyId?.default);
     return resolveFontFamily(id);
   };
+
+  const photoUrl = React.useMemo(() => (photoFile ? URL.createObjectURL(photoFile) : null), [photoFile]);
+  React.useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
+
+  // CP-003: 업로드한 로고는 AI가 재창작하지 않고 그대로(원본 비율 유지) 보여줍니다 — 색상 박스로 대체하지 않음.
+  const logoUrl = React.useMemo(() => (logoFile?.type?.startsWith("image/") ? URL.createObjectURL(logoFile) : null), [logoFile]);
+  React.useEffect(() => () => { if (logoUrl) URL.revokeObjectURL(logoUrl); }, [logoUrl]);
+
+  // 연락처 관련 필드를 "contact"라는 한 덩어리로 뭉쳐 그리던 걸 그만두고, 각각을
+  // 독립된 요소로 다룹니다 — "핸드폰번호도 개별적으로 위치·크기를 바꿀 수 있으면
+  // 좋겠다"는 요청 반영. telephoneFax는 전화번호+팩스번호를 한 줄에 같이 보여달라는
+  // 요청을 반영한 합성 필드입니다. 값이 없는 항목은 null을 돌려주고, 그 요소는
+  // 아예 그리지 않습니다(렌더 루프에서 스킵).
+  const textFor = (key) => {
+    if (key === "company") return fields?.["companyName"] || TEXTS.fallbackCompanyName;
+    // "person"(직위·이름 묶음)을 독립 요소 두 개로 나눴습니다 — 크기를 따로
+    // 조절 못 해서 "직위가 이름보다 작아야 하는데 같이 커진다"는 문제가 있었습니다.
+    if (key === "position") return fields?.["position"] || TEXTS.fallbackPosition;
+    if (key === "personName") {
+      const base = fields?.["personName"] || TEXTS.fallbackPersonName;
+      return nameEnglish?.trim() ? `${base} (${nameEnglish.trim()})` : base;
+    }
+    if (key === "mobile") return fields?.mobile?.trim() || null;
+    if (key === "telephoneFax") {
+      const tel = fields?.telephone?.trim();
+      const fax = fields?.fax?.trim();
+      if (tel && fax) return `${tel} · Fax ${fax}`;
+      if (tel) return tel;
+      if (fax) return `Fax ${fax}`;
+      return null;
+    }
+    if (key === "address") return fields?.address?.trim() || null;
+    if (key === "email") return fields?.email?.trim() || null;
+    if (key === "website") return fields?.website?.trim() || null;
+    if (key === "etc") return fields?.etc?.trim() || null;
+    return "";
+  };
   const CONTACT_SUB_KINDS = ["mobile", "telephoneFax", "address", "email", "website", "etc"];
-  const anyContactFilled = CONTACT_SUB_KINDS.some((k) => layout[k] && textFor(k, fields, nameEnglish));
+  const anyContactFilled = CONTACT_SUB_KINDS.some((k) => layout[k] && textFor(k));
+  const FIELD_ICON = { mobile: Phone, telephoneFax: Phone, address: MapPin, email: Mail, website: Globe };
+  const defaultEmphasis = { company: "lg", position: "sm", personName: "md" };
 
-  const parts = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${workingW}mm" height="${workingH}mm" viewBox="0 0 ${workingW} ${workingH}">`);
-  // 배경(도련 전체 — 실제 인쇄에서는 도련까지 배경색이 깔려야 흰 테두리가 안 남습니다)
-  const bgFill = bgOption?.id === "gradient" ? "url(#bgGradient)" : (bgOption?.id === "soft" ? "#F4F1FB" : "#FFFFFF");
-  if (bgOption?.id === "gradient") {
-    parts.push(`<defs><linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6C4CF0"/><stop offset="100%" stop-color="#4C6FFF"/></linearGradient></defs>`);
-  }
-  parts.push(`<rect x="0" y="0" width="${workingW}" height="${workingH}" fill="${bgFill}"/>`);
-
-  // 2026-08-02: "안전영역 재정의" 반영 — 텍스트·로고는 안전영역(safeMargin) 안에
-  // 머물러야 하지만(기존 그대로, resolveElementPosition의 clampToAllowedRegion이
-  // 담당), 배경색·그림(사진)처럼 "디자인의 배경이 되는 요소"는 재단선(trim)이 아니라
-  // 도련까지 포함한 작업선까지 꽉 채워야 합니다 — 재단 시 아주 약간의 오차가 있어도
-  // 흰 테두리가 남지 않게 하기 위해서입니다. 배경색은 이미 도련 전체를 채우고
-  // 있었는데(위 rect), 사진(photo) rect는 trim 기준으로만 계산되어 있어서 카드
-  // 가장자리에 닿는 사진(사진 배경형·상단형·하단형·분할형·우측형)에서 도련만큼
-  // 얇게 흰 여백이 남는 진짜 버그가 있었습니다. 아래에서, 사진 영역이 원래 카드의
-  // 어느 가장자리(0% 또는 100%)에 닿아있었는지 보고, 닿아있던 쪽으로만 도련만큼
-  // 밀어서 확장합니다(중앙에 떠 있는 프로필 원형 같은 사진은 어느 쪽도 안 닿아있으니
-  // 그대로 둡니다).
-  if (layout.photo) {
-    // 2026-08-02: "사진형도 위치·크기를 옮길 수 있게 해달라"는 요청 반영 — 미리보기와
-    // 똑같은 함수(computeEffectivePhotoRect)로 사용자가 옮긴 만큼을 먼저 반영한
-    // "실제" rect를 구하고, 도련 확장 여부(아래)는 원래 정의가 아니라 이 조정된
-    // rect가 지금 가장자리에 닿아있는지를 기준으로 다시 판단합니다 — 그래야 사진을
-    // 조금 옮긴 뒤에도 도련 처리가 계속 정확합니다.
-    const photoOffsetMm = patternSelections?.photoFineOffsetMm || { x: 0, y: 0 };
-    const photoScale = patternSelections?.photoScale || 1;
-    const rect = computeEffectivePhotoRect(layout.photo.rect, photoOffsetMm, photoScale, spec.trimWidth, spec.trimHeight);
-    let px = spec.bleed + (rect.left / 100) * spec.trimWidth;
-    let py = spec.bleed + (rect.top / 100) * spec.trimHeight;
-    let pw = (rect.width / 100) * spec.trimWidth;
-    let ph = (rect.height / 100) * spec.trimHeight;
-    const EDGE_EPS = 0.01; // % 단위 반올림 오차 허용
-    if (rect.left <= EDGE_EPS) { px -= spec.bleed; pw += spec.bleed; }
-    if (rect.left + rect.width >= 100 - EDGE_EPS) { pw += spec.bleed; }
-    if (rect.top <= EDGE_EPS) { py -= spec.bleed; ph += spec.bleed; }
-    if (rect.top + rect.height >= 100 - EDGE_EPS) { ph += spec.bleed; }
-    if (layout.photo.shape === "circle") {
-      parts.push(`<clipPath id="photoClip"><ellipse cx="${px + pw / 2}" cy="${py + ph / 2}" rx="${pw / 2}" ry="${ph / 2}"/></clipPath>`);
-    }
-    parts.push(`<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#E9E7F5" ${layout.photo.shape === "circle" ? 'clip-path="url(#photoClip)"' : ""}/>`);
-    // 실제 고객 사진 파일은 이 자리에 <image>로 들어가야 하지만, 여기서는 사진 자체를
-    // 다루지 않습니다(사진형 주문은 아직 사진 업로드가 이 파이프라인과 안 이어져 있음 —
-    // 별도로 확인이 필요합니다).
-  }
-
-  // 각 요소(로고/회사명/이름·직위/연락처 세부항목)
-  for (const [key, pos] of Object.entries(layout)) {
-    if (pos.kind === "photo") continue;
-    if (pos.kind === "logo" && !showLogo) continue;
-    const text = textFor(key, fields, nameEnglish);
-    const isMobileFallback = key === "mobile" && text === null && !anyContactFilled;
-    if (text === null && !isMobileFallback) continue;
-    const displayText = isMobileFallback ? "010-0000-0000" : text;
-
-    const { x, y } = resolveElementPosition(pos.kind, pos, spec);
-    const xMm = safeOriginXMm + (x / 100) * safeWidthMm;
-    const yMm = safeOriginYMm + (y / 100) * safeHeightMm;
-    const align = alignFor(x);
-    const valign = valignFor(y);
-    const isLogo = pos.kind === "logo";
-
-    if (isLogo) {
-      // LOGO_SIZE_PERCENT의 full 모드 값(%, 안전영역 너비 기준)을 그대로 mm로 환산
-      const sizePercent = LOGO_SIZE_PERCENT.full[pos.size || "md"];
-      const sizeMm = (sizePercent / 100) * safeWidthMm;
-      const boxX = align === "left" ? xMm : align === "right" ? xMm - sizeMm : xMm - sizeMm / 2;
-      const boxY = valign === "top" ? yMm : valign === "bottom" ? yMm - sizeMm : yMm - sizeMm / 2;
-      if (logoDataUrl) {
-        parts.push(`<image x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
-      } else {
-        parts.push(`<rect x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" fill="${resolveLogoColor(logoColor)}" stroke="rgba(0,0,0,0.18)" stroke-width="0.2"/>`);
-      }
-      continue;
-    }
-
-    const pointSizePt = pos.pointSize != null ? pos.pointSize : EMPHASIS_PT_FALLBACK[pos.emphasis || "md"];
-    const fontSizeMm = pointSizePt * PT_TO_MM;
-    const fontDef = fontForKind(key);
-    const fill = (pos.overlay || needsLightText) ? "#FFFFFF" : "#1A1A22";
-    const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
-    // SVG의 dominant-baseline만으로 valign(top/middle/bottom)을 정확히 맞추기 어려워서,
-    // y좌표 자체를 폰트 크기 기준으로 보정합니다 — 화면(CSS translate)과 같은 결과를 냅니다.
-    const yAdjusted = valign === "top" ? yMm + fontSizeMm * 0.8 : valign === "bottom" ? yMm - fontSizeMm * 0.2 : yMm + fontSizeMm * 0.3;
-    parts.push(
-      `<text x="${xMm}" y="${yAdjusted}" font-size="${fontSizeMm}" font-family="${escapeXml(fontDef.family.replace(/'/g, ""))}" font-weight="${fontDef.weight}" fill="${fill}" text-anchor="${anchor}">${escapeXml(displayText)}</text>`
-    );
-  }
-
-  parts.push(`</svg>`);
-  return parts.join("\n");
-}
-
-function svgToDataUrl(svgString) {
-  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgString)))}`;
-}
-
-// 뒷면 패널 하나만 그립니다 — BACK_LAYOUTS(domain/frame/backLayouts.js)의 logo/qr/blank/
-// text 중 하나("custom"은 사람이 직접 디자인하므로 여기서 다루지 않습니다).
-// 2026-08-01: "text"(문구형) 추가 — 여러 줄 문구를 정렬(왼쪽/가운데/오른쪽)·서체
-// 선택해서 넣을 수 있습니다. backContent = { lines: string[], align: "left"|"center"|"right", fontFamilyId }.
-function buildBackPanelSVG(choice, spec, offsetX, logoDataUrl, logoColor, backContent = null) {
-  const workingW = spec.trimWidth + spec.bleed * 2;
-  const workingH = spec.trimHeight + spec.bleed * 2;
-  const cx = offsetX + workingW / 2;
-  const cy = workingH / 2;
-  const parts = [`<rect x="${offsetX}" y="0" width="${workingW}" height="${workingH}" fill="#FFFFFF"/>`];
-  if (choice === "logo") {
-    const size = Math.min(workingW, workingH) * 0.35;
-    if (logoDataUrl) {
-      parts.push(`<image x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
+  // 2026-08-01: "위치조정은 버튼 대신 미리보기에서 손가락/마우스로 직접 옮기게 해달라"는
+  // 요청으로 드래그 기능을 추가했습니다. safeAreaRef는 안전영역 박스(children의 left/top
+  // %가 이 박스 기준)를 가리키고, dragRef는 드래그 중인 요소와 마지막 포인터 좌표를
+  // 들고 있습니다(리렌더와 무관하게 유지해야 해서 state가 아니라 ref). 이동량은 매
+  // pointermove마다 "직전 위치 대비 델타"를 mm로 환산해 onDragKindMove로 부모에
+  // 넘기고, 부모가 patternSelections의 FineOffsetMm에 누적합니다 — 그 값은 항상
+  // Kernel(designRules.js)의 clampToAllowedRegion을 다시 거치므로, 아무리 세게
+  // 끌어도 안전영역·재단선을 벗어난 값이 될 수 없습니다.
+  // 2026-08-01(추가): "순서대로 안내하는 것도 좋지만, 중간에 마음이 바뀌면 아무
+  // 요소나 눌러서 바로 옮길 수 있어야 한다"는 요청 반영. 이제 onPointerDown이 눌린
+  // 요소를 즉시 선택(onSelectKind)하고 같은 제스처로 바로 드래그를 시작합니다 —
+  // "이전"을 여러 번 눌러야 원하는 항목으로 돌아갈 수 있던 불편을 없앴습니다.
+  // interactiveKind는 여전히 "지금 안내 문구가 가리키는 항목"이자 강조 표시 대상이고,
+  // 안내 순서(이전/다음)는 그대로 같이 쓸 수 있습니다.
+  const safeAreaRef = React.useRef(null);
+  // 2026-08-07: 사진(photo)의 좌표는 텍스트/로고와 달리 안전영역이 아니라 "재단선
+  // 전체 캔버스" 기준입니다(사진은 카드 가장자리까지 닿을 수 있어야 하니까요) —
+  // 아래 드래그 계산에서 이 ref를 따로 씁니다.
+  const canvasRef = React.useRef(null);
+  const dragRef = React.useRef(null);
+  // 2026-08-01: 정렬 가이드/스냅 계산용 — 매 렌더마다 모든 요소의 최신 좌표를
+  // 여기 캐시해둡니다(아래 렌더 부분 참고). pointermove 핸들러에서 "직전 렌더의
+  // 다른 요소 좌표"와 비교해 자석처럼 붙일지 판단합니다. ref라서 리렌더를
+  // 일으키지 않고, 이벤트 핸들러 안에서 최신 값을 즉시 읽을 수 있습니다.
+  const elementGeomsRef = React.useRef([]);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const handleDragPointerDown = (e, key) => {
+    if (!onDragKindMove) return;
+    e.preventDefault();
+    onSelectKind?.(key);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    // 2026-08-07(버그 수정): "사진을 손가락으로 옮기려 해도 안 움직인다"는 신고 반영.
+    // 사진은 elementGeomsRef(텍스트/로고 전용 캐시)에 없어서, 시작 좌표가 항상
+    // 하드코딩된 50(카드 중앙)으로 잘못 잡히고 있었습니다 — 실제 사진 위치와
+    // 다르면 드래그 계산 전체가 어긋납니다. 사진일 땐 effectivePhotoRect(지금 실제
+    // 위치)에서 시작 좌표를 가져오도록 고쳤습니다.
+    let rawX = 50, rawY = 50;
+    if (key === "photo" && effectivePhotoRect) {
+      rawX = effectivePhotoRect.left;
+      rawY = effectivePhotoRect.top;
     } else {
-      parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="${resolveLogoColor(logoColor)}"/>`);
+      const geom = elementGeomsRef.current.find((g) => g.key === key);
+      if (geom) { rawX = geom.x; rawY = geom.y; }
     }
-  } else if (choice === "qr") {
-    const size = Math.min(workingW, workingH) * 0.4;
-    parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="#1A1A22"/>`);
-    parts.push(`<text x="${cx}" y="${cy}" font-size="4" fill="#fff" text-anchor="middle" dominant-baseline="middle">QR</text>`);
-  } else if (choice === "text" && backContent) {
-    const lines = (backContent.lines || []).filter((l) => l.trim());
-    const fontDef = resolveFontFamily(backContent.fontFamilyId);
-    const align = backContent.align || "left";
-    const marginMm = spec.safeMargin + spec.bleed;
-    const textAnchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
-    const xPos = align === "left" ? offsetX + marginMm : align === "right" ? offsetX + workingW - marginMm : cx;
-    // 폰트 크기는 줄 수에 따라 살짝 줄여서(너무 많이 넣으면 겹치는 대신 작아지게)
-    // 최소한의 안전장치를 둡니다 — 앞면처럼 정교한 겹침 방지는 아니지만, 아예 안전선을
-    // 벗어나 잘리는 것보다는 낫습니다.
-    const fontSize = lines.length <= 3 ? 5.5 : lines.length <= 6 ? 4.2 : 3.4;
-    const lineHeight = fontSize * 1.5;
-    const totalHeight = lines.length * lineHeight;
-    const startY = cy - totalHeight / 2 + fontSize;
-    lines.forEach((line, i) => {
-      const y = startY + i * lineHeight;
-      const safeLine = String(line).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      parts.push(`<text x="${xPos}" y="${y}" font-size="${fontSize}" font-family="${fontDef.family}" font-weight="${fontDef.weight}" fill="#1A1A22" text-anchor="${textAnchor}">${safeLine}</text>`);
-    });
-  }
-  // "blank"은 배경만 있는 빈 뒷면입니다.
-  return parts.join("\n");
-}
+    dragRef.current = { key, x: e.clientX, y: e.clientY, rawX, rawY };
+    setIsDragging(true);
+  };
+  const handleDragPointerMove = (e, key) => {
+    const st = dragRef.current;
+    if (!st || st.key !== key) return;
+    // 2026-08-07(버그 수정): 사진은 텍스트/로고와 다른 좌표계(안전영역이 아니라
+    // 재단선 전체 캔버스)를 쓰므로, 픽셀↔퍼센트 변환 기준(rect)과 mm 환산 기준
+    // (가로세로 mm)도 사진일 땐 따로 써야 합니다. 예전엔 항상 안전영역 기준으로만
+    // 계산해서, 사진을 끌어도 실제 손가락 이동량과 계산이 어긋나 "안 움직이는
+    // 것처럼" 보였습니다.
+    const isPhoto = key === "photo";
+    const refEl = isPhoto ? canvasRef.current : safeAreaRef.current;
+    const rect = refEl?.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return;
+    const dxPercent = ((e.clientX - st.x) / rect.width) * 100;
+    const dyPercent = ((e.clientY - st.y) / rect.height) * 100;
+    st.x = e.clientX; st.y = e.clientY;
+    // 스냅과 무관하게, 마우스가 실제로 움직인 만큼 그대로 누적합니다.
+    st.rawX += dxPercent;
+    st.rawY += dyPercent;
 
-// 앞면 SVG 문자열(buildCardSVG의 결과)과 뒷면 선택지를 받아, 인쇄소가 한 파일에서
-// 양면을 바로 알아볼 수 있도록 나란히 배치한 하나의 SVG로 합칩니다. 각 패널 위에
-// "앞면"/"뒷면" 표시는 실제 인쇄 영역(도련) 바깥의 여유 공간에만 넣어서, 인쇄되는
-// 카드 내용 자체에는 전혀 영향이 없습니다.
-// 2026-08-01: "가로형/세로형을 앞뒤 독립적으로 고를 수 있어야 한다"는 요청으로
-// frontSpec/backSpec을 따로 받습니다(카드 바깥 모양은 물리적으로 앞뒤가 같아야
-// 하지만 — 한 장의 카드니까 — 그 안 내용 배치는 완전히 독립적입니다. 앞뒤를 다른
-// 모양으로 고르면 그 상태 그대로 반영됩니다. 자동으로 서로 맞춰 돌리는 기능은
-// "흔치 않은 경우라 필요 없다"고 확인받아 만들지 않았습니다). 높이가 서로 다르면
-// 짧은 쪽을 세로 가운데로 맞춰서 나란히 놓습니다.
-function buildDoubleSidedSVG(frontSvgInner, backLayoutChoice, frontSpec, logoDataUrl, logoColor, backContent = null, backSpec = frontSpec) {
-  const frontW = frontSpec.trimWidth + frontSpec.bleed * 2;
-  const frontH = frontSpec.trimHeight + frontSpec.bleed * 2;
-  const backW = backSpec.trimWidth + backSpec.bleed * 2;
-  const backH = backSpec.trimHeight + backSpec.bleed * 2;
-  const gap = 10; // mm, 앞/뒤 사이 여백
-  const labelHeight = 6; // mm, 라벨용 여유
-  const totalW = frontW + gap + backW;
-  const maxPanelH = Math.max(frontH, backH);
-  const totalH = maxPanelH + labelHeight;
-  const frontOffsetY = (maxPanelH - frontH) / 2;
-  const backOffsetY = (maxPanelH - backH) / 2;
-  const backOffsetX = frontW + gap;
-  const frontInnerMatch = frontSvgInner.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
-  const frontInner = frontInnerMatch ? frontInnerMatch[1] : frontSvgInner;
+    const widthMm = isPhoto ? spec.trimWidth : (spec.trimWidth - spec.safeMargin * 2);
+    const heightMm = isPhoto ? spec.trimHeight : (spec.trimHeight - spec.safeMargin * 2);
 
-  const parts = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}mm" height="${totalH}mm" viewBox="0 0 ${totalW} ${totalH}">`);
-  parts.push(`<text x="0" y="4" font-size="3" fill="#999">앞면 (Front)</text>`);
-  parts.push(`<text x="${backOffsetX}" y="4" font-size="3" fill="#999">뒷면 (Back)</text>`);
-  parts.push(`<g transform="translate(0, ${labelHeight + frontOffsetY})">${frontInner}</g>`);
-  parts.push(`<g transform="translate(0, ${labelHeight + backOffsetY})">${buildBackPanelSVG(backLayoutChoice, backSpec, backOffsetX, logoDataUrl, logoColor, backContent)}</g>`);
-  parts.push(`</svg>`);
-  return parts.join("\n");
-}
+    let targetX = st.rawX;
+    let targetY = st.rawY;
+    let displayedX = st.rawX;
+    let displayedY = st.rawY;
 
-// ==================== domain/company/emailVerification ====================
-// ====================================================================
-// Domain : Company / Email Verification
-// Responsibility : 회사 이메일 소유 여부를 실제로 증명하는 절차 (도메인 문자열
-//                  일치만으로는 증명이 안 됨 — 누구나 타이핑만으로 남의 회사
-//                  이메일을 입력할 수 있기 때문에, 그 메일함에 실제로 접근
-//                  권한이 있는지 인증코드로 확인합니다).
-//
-// 아래 세 값은 전부 실제로 확인된 값입니다(2026-07-29): SERVICE_ID는 orderNotification.js
-// 와 같은 계정, TEMPLATE_ID는 "One-Time Password" 템플릿(변수: to_email/verification_code
-// 확인됨), PUBLIC_KEY도 EmailJS 대시보드에서 직접 확인. 이제 자리표시자가 아닙니다.
-// ====================================================================
-const EMAILJS_SERVICE_ID = "service_c48f848";
-const EMAILJS_VERIFY_TEMPLATE_ID = "template_zbv0idi";
-const EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+    if (isPhoto) {
+      // 사진은 다른 사진이 없어서 정렬 스냅 대상이 아닙니다 — 마우스가 움직인 만큼
+      // 그대로, 지금 실제 위치(effectivePhotoRect)를 기준으로 이동합니다.
+      if (effectivePhotoRect) {
+        displayedX = effectivePhotoRect.left;
+        displayedY = effectivePhotoRect.top;
+      }
+    } else {
+      // 2026-08-01: "포토샵처럼 줄이 맞는지 비교해달라"는 요청으로 추가한 정렬 스냅.
+      // 직전 렌더에서 캐시해둔 다른 요소들의 좌표(elementGeomsRef)와 비교해서, 같은
+      // 정렬 방식(예: 오른쪽 정렬끼리)끼리 "진짜 좌표(rawX/rawY)"가 GUIDE_SNAP_THRESHOLD_PCT
+      // 이내로 가까우면 그 좌표에 정확히 붙습니다. 비교 기준이 화면에 보이는 좌표가
+      // 아니라 rawX/rawY라서, 마우스가 계속 멀어지면 반드시 풀립니다(더 이상 "덫"에
+      // 걸리지 않음).
+      const prevGeoms = elementGeomsRef.current;
+      const activePrev = prevGeoms.find((g) => g.key === key);
+      if (activePrev) {
+        const others = prevGeoms.filter((g) => g.key !== key);
+        const matchX = others.find((g) => g.align === activePrev.align && Math.abs(g.x - st.rawX) < GUIDE_SNAP_THRESHOLD_PCT);
+        if (matchX) targetX = matchX.x;
+        const matchY = others.find((g) => g.valign === activePrev.valign && Math.abs(g.y - st.rawY) < GUIDE_SNAP_THRESHOLD_PCT);
+        if (matchY) targetY = matchY.y;
+        displayedX = activePrev.x;
+        displayedY = activePrev.y;
+      }
+    }
 
-const CODE_LENGTH = 6;
-const CODE_VALID_MS = 5 * 60 * 1000; // 5분
+    // 화면에 실제로 적용할 델타 = (스냅 적용된 목표 좌표) − (지금 화면에 보이는 좌표)
+    const dxMm = ((targetX - displayedX) / 100) * widthMm;
+    const dyMm = ((targetY - displayedY) / 100) * heightMm;
 
-function generateVerificationCode() {
-  const min = 10 ** (CODE_LENGTH - 1);
-  const max = 10 ** CODE_LENGTH - 1;
-  return String(Math.floor(min + Math.random() * (max - min + 1)));
-}
+    if (dxMm || dyMm) onDragKindMove(key, dxMm, dyMm);
+  };
+  const handleDragPointerUp = (e, key) => {
+    if (dragRef.current?.key === key) dragRef.current = null;
+    setIsDragging(false);
+  };
 
-// EmailJS REST API로 직접 POST — SDK를 새로 설치하지 않아도 되도록 fetch만 사용합니다.
-// (getStyleSuggestion이 Anthropic API를 fetch로 직접 호출하는 것과 같은 방식)
-async function sendVerificationEmail(email, code) {
-  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_VERIFY_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY,
-      template_params: { to_email: email, verification_code: code },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`이메일 발송 실패 (${res.status})`);
-  }
-}
+  return (
+    <div style={{
+      position: "relative", width: "100%", aspectRatio: `${spec.trimWidth} / ${spec.trimHeight}`,
+      background: bgCss, border: "none", borderRadius: 4, overflow: "hidden",
+    }}>
+      {/* 2026-08-01: 요소를 선택할 때 0.5초 정도 부드럽게 "반짝"하는 강조 효과용
+          keyframes. isActive가 mount될 때마다(요소를 새로 선택할 때마다) 재생됩니다. */}
+      {!compact && onDragKindMove && (
+        <style>{`
+          @keyframes cardstudioSelectPulse {
+            0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.55); }
+            60% { box-shadow: 0 0 0 7px rgba(59,130,246,0); }
+            100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+          }
+        `}</style>
+      )}
+      <div ref={canvasRef} style={{
+        position: "absolute",
+        left: 0, top: 0, right: 0, bottom: 0,
+      }}>
+        {/* 사진(Photo)은 zone 기반이 아니라 재단선 기준 사각형(rect, %)으로 바로 배치합니다 — 로고와 달리 넓은 영역을 차지하기 때문.
+            2026-08-02: 이제 로고·텍스트와 같은 방식으로 눌러서 옮기고(드래그), 아래 크기조절 버튼으로 배율도 바꿀 수 있습니다. */}
+        {layout.photo && effectivePhotoRect && (() => {
+          const isSelectable = !!onDragKindMove;
+          const isActive = isSelectable && interactiveKind === "photo";
+          return (
+            <div
+              onPointerDown={isSelectable ? (e) => handleDragPointerDown(e, "photo") : undefined}
+              onPointerMove={isSelectable ? (e) => handleDragPointerMove(e, "photo") : undefined}
+              onPointerUp={isSelectable ? (e) => handleDragPointerUp(e, "photo") : undefined}
+              onPointerCancel={isSelectable ? (e) => handleDragPointerUp(e, "photo") : undefined}
+              style={{
+                position: "absolute",
+                left: `${effectivePhotoRect.left}%`, top: `${effectivePhotoRect.top}%`,
+                width: `${effectivePhotoRect.width}%`, height: `${effectivePhotoRect.height}%`,
+                borderRadius: layout.photo.shape === "circle" ? "50%" : 0,
+                overflow: "hidden",
+                background: photoUrl ? `center / cover no-repeat url(${photoUrl})` : "var(--paper-deep)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                ...(isSelectable
+                  ? {
+                      cursor: "grab", touchAction: "none", userSelect: "none",
+                      outline: isActive ? `2px solid ${SELECTED_ACCENT_COLOR}` : "1px dashed rgba(0,0,0,0.18)",
+                      outlineOffset: 4,
+                    }
+                  : {}),
+              }}
+            >
+              {!photoUrl && !compact && <Camera size={18} color="var(--ink-soft)" />}
+              {isActive && (
+                <>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute", top: -4, left: -4, right: -4, bottom: -4,
+                      borderRadius: layout.photo.shape === "circle" ? "50%" : 8,
+                      animation: "cardstudioSelectPulse 0.6s ease-out",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute", top: -10, right: -10,
+                      width: 20, height: 20, borderRadius: "50%",
+                      background: SELECTED_ACCENT_COLOR, color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, boxShadow: "0 0 0 1.5px #fff", zIndex: 2, pointerEvents: "none",
+                    }}
+                  >
+                    ✥
+                  </span>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
-// 사용자가 입력한 코드가 실제로 보낸 코드와 일치하고, 유효시간 안인지 확인.
-function checkVerificationCode(inputCode, sentCode, sentAt) {
-  if (!sentCode || !sentAt) return { ok: false, reason: "not_sent" };
-  if (Date.now() - sentAt > CODE_VALID_MS) return { ok: false, reason: "expired" };
-  if (inputCode !== sentCode) return { ok: false, reason: "mismatch" };
-  return { ok: true };
+        <div
+          ref={safeAreaRef}
+          style={{
+            position: "absolute",
+            left: `${safeXPct}%`, top: `${safeYPct}%`, right: `${safeXPct}%`, bottom: `${safeYPct}%`,
+            border: compact ? "none" : "1px dashed rgba(108,76,240,0.35)",
+          }}
+        >
+          {/* 2026-08-01: Object.entries(layout) 대신 ALL_PATTERN_KINDS 고정 순서로 돕니다 —
+              layout 객체의 키 순서가 아래 조절 패널의 순서와 어긋나 있던 게 "미리보기랑
+              조절 버튼이 따로 논다"는 혼란의 원인이었습니다. 이제 이 배열 하나가 미리보기
+              그리는 순서와 조절 패널 항목 순서 둘 다의 기준입니다(patternLibrary.js에서 export). */}
+          {(() => {
+            // 2026-08-01: 예전엔 이 자리에서 바로 JSX를 반환하는 한 번짜리 .map이었는데,
+            // 정렬 가이드 선을 그리려면 "다른 모든 요소들의 좌표"가 먼저 다 계산돼
+            // 있어야 해서 데이터 계산(elements)과 JSX 렌더를 두 단계로 나눴습니다.
+            // 로직 자체는 그대로 옮긴 것뿐이라 계산 결과는 이전과 동일합니다.
+            const elements = ALL_PATTERN_KINDS.map((key) => {
+              const pos = layout[key];
+              if (!pos) return null;
+              if (pos.kind === "photo") return null; // 위에서 이미 그림
+              if (pos.kind === "logo" && !showLogo) return null;
+              // 값이 없는 연락처 하위 항목은 그리지 않습니다 — 다만 전부 비어있으면
+              // (한 항목도 안 채웠으면) mobile 자리에 안내용 예시를 하나만 보여줍니다.
+              const text = textFor(key);
+              const isMobileFallback = key === "mobile" && text === null && !anyContactFilled;
+              if (text === null && !isMobileFallback) return null;
+              const displayText = isMobileFallback ? TEXTS.fallbackPhone : text;
+
+              const { x, y } = resolveElementPosition(pos.kind, pos, spec);
+              const isLogo = pos.kind === "logo";
+              const align = x <= DESIGN_RULES.alignment.leftThreshold ? "left" : x >= DESIGN_RULES.alignment.rightThreshold ? "right" : "center";
+              const translateX = align === "left" ? "0%" : align === "right" ? "-100%" : "-50%";
+              // 세로 방향도 가로와 동일한 임계값 규칙을 적용합니다 — 이게 없으면 y가 0(맨 위)이나
+              // 100(맨 아래)인 요소가 항상 세로 중앙 정렬(-50%)되어 버려서, 박스의 절반이 안전영역
+              // 경계 밖(도련·재단선 쪽)으로 삐져나가는 문제가 있었습니다(특히 연락처가 맨 아래에
+              // 걸쳐서 인쇄 시 잘릴 수 있는 문제). 위/아래 가장자리 근처에서는 박스를 안쪽으로만
+              // 펼치고, 중간 영역에서만 중앙 정렬합니다.
+              const valign = y <= DESIGN_RULES.alignment.leftThreshold ? "top" : y >= DESIGN_RULES.alignment.rightThreshold ? "bottom" : "middle";
+              const translateY = valign === "top" ? "0%" : valign === "bottom" ? "-100%" : "-50%";
+              const emphasis = pos.emphasis || defaultEmphasis[key] || "md";
+              const logoSize = pos.size || "md";
+              const fontDef = fontForKind(key);
+              // pointSize가 있으면(=Pattern Library 경로) 그 값을 쓰고, 없으면(=아직
+              // Pattern Library로 안 옮긴 레이아웃) 기존 emphasis 3단계를 씁니다.
+              const baseFontSize = pos.pointSize != null ? pos.pointSize : TEXT_EMPHASIS_SIZE[mode][emphasis];
+              const fontSizePx = compact ? baseFontSize * COMPACT_SIZE_SCALE : baseFontSize;
+              const Icon = showContactIcon ? FIELD_ICON[key] : null;
+              // 2026-08-01: 이제 "지금 안내 중인 항목"만이 아니라 실제 내용이 있는
+              // 요소는 전부 눌러서 바로 선택+이동할 수 있습니다(isSelectable). 그중에서도
+              // interactiveKind와 같은 것만 "지금 안내 문구가 가리키는 항목"으로 진하게
+              // 강조합니다(isActive) — 나머지도 흐리게 죽이지 않고 옅은 점선으로만 "이것도
+              // 누르면 움직일 수 있다"는 힌트만 줍니다.
+              const isSelectable = !!onDragKindMove && !isMobileFallback;
+              const isActive = isSelectable && key === interactiveKind;
+              return {
+                key, pos, displayText, x, y, isLogo, align, translateX, valign, translateY,
+                logoSize, fontDef, fontSizePx, Icon, isSelectable, isActive,
+              };
+            }).filter(Boolean);
+
+            // 다음 pointermove 이벤트(handleDragPointerMove)에서 정렬 스냅을 계산할 때
+            // 쓸 수 있도록, 이번 렌더의 모든 요소 좌표를 캐시해둡니다.
+            elementGeomsRef.current = elements.map((el) => ({ key: el.key, x: el.x, y: el.y, align: el.align, valign: el.valign }));
+
+            // 2026-08-01: 지금 드래그 중인 요소가 다른 요소와 "같은 정렬 방식 + 좌표가
+            // 아주 가까움"이면 빨간 점선 가이드를 보여줍니다(포토샵 스마트 가이드 방식).
+            const activeEl = isDragging ? elements.find((el) => el.isActive) : null;
+            const guideX = activeEl && elements.some((el) => el.key !== activeEl.key && el.align === activeEl.align && Math.abs(el.x - activeEl.x) < GUIDE_SNAP_THRESHOLD_PCT) ? activeEl.x : null;
+            const guideY = activeEl && elements.some((el) => el.key !== activeEl.key && el.valign === activeEl.valign && Math.abs(el.y - activeEl.y) < GUIDE_SNAP_THRESHOLD_PCT) ? activeEl.y : null;
+
+            return (
+              <>
+                {elements.map((el) => {
+                  const { key, pos, displayText, x, y, isLogo, align, translateX, valign, translateY, logoSize, fontDef, fontSizePx, Icon, isSelectable, isActive } = el;
+                  return (
+                    <div
+                      key={key}
+                      onPointerDown={isSelectable ? (e) => handleDragPointerDown(e, key) : undefined}
+                      onPointerMove={isSelectable ? (e) => handleDragPointerMove(e, key) : undefined}
+                      onPointerUp={isSelectable ? (e) => handleDragPointerUp(e, key) : undefined}
+                      onPointerCancel={isSelectable ? (e) => handleDragPointerUp(e, key) : undefined}
+                      style={{
+                        position: "absolute", left: `${x}%`, top: `${y}%`,
+                        transform: `translate(${translateX}, ${translateY})`,
+                        display: "flex",
+                        flexDirection: align === "right" ? "row-reverse" : "row",
+                        alignItems: "center",
+                        justifyContent: isLogo ? "center" : "flex-start",
+                        gap: 4,
+                        transition: "outline-color 0.15s",
+                        ...(isSelectable
+                          ? {
+                              cursor: "grab", touchAction: "none", userSelect: "none",
+                              // 2026-08-01(개정): kind마다 다른 색 대신, "선택된 것 = 파란 테두리"
+                              // 하나로 통일했습니다. 선택 안 된 나머지는 옅은 회색 점선으로
+                              // "이것도 눌러서 옮길 수 있다"는 힌트만 줍니다.
+                              outline: isActive
+                                ? `2px solid ${SELECTED_ACCENT_COLOR}`
+                                : "1px dashed rgba(0,0,0,0.18)",
+                              outlineOffset: 4,
+                              borderRadius: isLogo ? (compact ? 2 : 5) : 6,
+                            }
+                          : {}),
+                        ...(isLogo
+                          ? {
+                              width: `${LOGO_SIZE_PERCENT[mode][logoSize]}%`, aspectRatio: "1 / 1",
+                              background: logoUrl ? "transparent" : resolveLogoColor(logoColor),
+                              // 로고가 배경색과 비슷한 톤일 때 완전히 안 보이는 걸 막는 최소한의
+                              // 안전장치 — 옅은 테두리를 항상 둡니다(업로드 이미지가 있을 땐 필요 없음).
+                              border: logoUrl ? "none" : "1px solid rgba(0,0,0,0.18)",
+                              borderRadius: compact ? 2 : 5, overflow: "hidden",
+                            }
+                          : {
+                              fontSize: fontSizePx, fontWeight: fontDef.weight, fontFamily: fontDef.family,
+                              color: (pos.overlay || needsLightText) ? "#fff" : "var(--ink)",
+                              textShadow: (pos.overlay || needsLightText) ? "0 1px 4px rgba(0,0,0,0.55)" : "none",
+                              whiteSpace: "nowrap", lineHeight: 1.2,
+                              textAlign: align === "left" ? "left" : align === "right" ? "right" : "center",
+                            }),
+                      }}
+                    >
+                      {isLogo ? (
+                        // CP-003: 업로드한 로고는 원본 그대로(object-fit: contain, 비율 유지) 표시 — AI가 재창작하거나 늘리지 않음
+                        logoUrl && <img src={logoUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", pointerEvents: "none" }} />
+                      ) : (
+                        <>
+                          {Icon && !compact && <Icon size={fontSizePx * 0.8} color={(pos.overlay || needsLightText) ? "#fff" : "var(--ink-soft)"} />}
+                          <span style={{ pointerEvents: "none" }}>{displayText}</span>
+                        </>
+                      )}
+                      {isActive && (
+                        <>
+                          {/* 2026-08-01: "선택하면 0.5초 정도 부드럽게 빛나면 좋겠다"는 요청으로
+                              추가. isActive가 false→true로 바뀔 때마다 이 span이 새로
+                              mount되면서(조건부 렌더링) 아래 @keyframes 애니메이션이 매번
+                              처음부터 다시 재생됩니다 — 다른 요소를 눌러 선택을 옮길 때마다
+                              "지금 이걸 고르셨어요"가 눈에 보이는 파동으로 한 번 반짝입니다. */}
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              position: "absolute", top: -4, left: -4, right: -4, bottom: -4,
+                              borderRadius: isLogo ? (compact ? 4 : 7) : 8,
+                              animation: "cardstudioSelectPulse 0.6s ease-out",
+                              pointerEvents: "none",
+                            }}
+                          />
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              position: "absolute", top: -10, right: -10,
+                              width: 20, height: 20, borderRadius: "50%",
+                              background: SELECTED_ACCENT_COLOR, color: "#fff",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontSize: 11, boxShadow: "0 0 0 1.5px #fff", zIndex: 2, pointerEvents: "none",
+                            }}
+                          >
+                            ✥
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+                {/* 2026-08-01: 정렬 가이드 — 포토샵/일러스트레이터에서 다른 요소와 줄이
+                    맞을 때 뜨는 빨간 점선과 같은 방식입니다. 세로선은 "같은 정렬(왼쪽/
+                    오른쪽/가운데)끼리 x좌표가 거의 같음"을, 가로선은 "같은 정렬(위/아래/
+                    중앙)끼리 y좌표가 거의 같음"을 의미합니다. 안전영역 박스 전체에 걸쳐
+                    그려서 "이 줄에 맞춰졌다"는 걸 명확히 보여줍니다. */}
+                {guideX != null && (
+                  <div aria-hidden="true" style={{ position: "absolute", left: `${guideX}%`, top: 0, bottom: 0, width: 0, borderLeft: `1.5px dashed ${GUIDE_LINE_COLOR}`, pointerEvents: "none", zIndex: 6 }} />
+                )}
+                {guideY != null && (
+                  <div aria-hidden="true" style={{ position: "absolute", top: `${guideY}%`, left: 0, right: 0, height: 0, borderTop: `1.5px dashed ${GUIDE_LINE_COLOR}`, pointerEvents: "none", zIndex: 6 }} />
+                )}
+              </>
+            );
+          })()}
+
+          {/* QR Object v1.0: 화면에서 실제로 켜졌을 때만 렌더링. 크기는 DRS의 qrPosition.minSizePercent(스캔 가능 최소 크기) 규칙을 따릅니다. */}
+          {qrEnabled && (() => {
+            const { x, y } = resolveElementPosition("qr", { zone: "bottomRight" }, spec);
+            const size = getQrSizePercent(mode);
+            return (
+              <div style={{
+                position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-100%, -100%)",
+                width: `${size}%`, aspectRatio: "1 / 1", background: "var(--ink)", borderRadius: compact ? 2 : 4,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {!compact && <span style={{ color: "#fff", fontSize: 6, fontWeight: 800 }}>QR</span>}
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ==================== domain/validation/index ====================
@@ -3822,6 +4060,156 @@ async function generateBackgroundOptions(industry, styleTags = [], colorId = nul
   }
   return response;
 }
+
+// ==================== domain/learning/index ====================
+// Learning Domain — "기록만 남겨두는 배관(plumbing)". STEP 7 전체(통계, 승격/강등
+// 판단, changeReason 수집 UI)는 아직 만들지 않습니다 — 실사용 데이터가 없는 상태에서
+// 만들면 검증 안 된 걸 마치 학습된 것처럼 보여주는 셈이기 때문입니다(예전에 뺀 가짜
+// "★★★★★ 인기순위"와 같은 문제).
+//
+// Learning Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   Phase 1 [x] classifier.js  — Standard/Creative Exception/Invalid Exception 분류
+//   Phase 1 [x] recorder.js    — 기록 저장(KPR 초기 status만 부여, 승격·강등 로직 없음)
+//   Phase 2 [ ] statistics.js  — 업종별 %분포 등 실제 통계 계산 (실사용 데이터 쌓인 뒤)
+//   Phase 3 [ ] memory.js      — standardMemory/creativeExceptionMemory/invalidExceptionMemory
+//                                조회 API (지금은 recorder.js 안에서 저장 키만 씀, 별도 조회 기능 없음)
+
+// ==================== domain/company/logoExtraction ====================
+// ====================================================================
+// Domain : Company / Logo Extraction
+// Responsibility : 명함·안내문·간판 사진 등 "로고가 일부만 포함된 사진"에서
+//                  로고 영역만 잘라내기.
+//
+// 설계 방향(중요): 배경까지 완전히 투명하게 지우는 이미지 분할(segmentation)이
+// 아니라, "이 사진에서 로고가 대략 어디 있는지" 위치만 비전 모델에게 물어보고,
+// 그 사각형 영역만 Canvas로 자릅니다. 전용 컴퓨터 비전 엔진을 직접 만드는 것보다
+// 훨씬 간단하고, 이미 있는 비전 API(여기서는 Claude API의 이미지 입력)로 충분합니다.
+// 배경이 완전히 투명하지 않고 사각형으로만 잘리는 것은 의도된 한계입니다 —
+// 필요성이 실제로 확인되면 그때 배경 제거를 별도로 추가합니다.
+// ====================================================================
+
+// 프롬프트를 한 곳에 모아둔 객체 — recommendationEngine.js와 같은 패턴입니다.
+// 아직 이거 하나뿐이라 별도 폴더(prompt/)로는 나누지 않았습니다.
+const LOGO_EXTRACTION_PROMPTS = {
+  extractLogo: `이 사진 안에 회사 로고가 보이면, 그 로고를 감싸는 사각형 영역을
+이미지 전체 크기에 대한 백분율(0~100)로 알려줘. 다른 설명 없이 아래 JSON 형식으로만 답변해:
+{"found": true, "x": 왼쪽 끝 %, "y": 위쪽 끝 %, "width": 너비 %, "height": 높이 %}
+로고를 찾지 못하면 {"found": false} 로만 답변해.`,
+};
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]); // "data:...;base64," 접두어 제거
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// 사진 안에서 로고가 있는 대략의 위치를 비전 모델에게 물어봅니다.
+// 반환값은 이미지 크기에 대한 상대 좌표(0~100, %)입니다 — 픽셀 좌표를 바로 받으면
+// 모델이 실제 표시 크기를 몰라 부정확해지기 쉬워서, 항상 %로 답하게 합니다.
+async function detectLogoRegion(file) {
+  const base64 = await fileToBase64(file);
+  const prompt = LOGO_EXTRACTION_PROMPTS.extractLogo;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 200,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 } },
+          { type: "text", text: prompt },
+        ],
+      }],
+    }),
+  });
+  if (!response.ok) throw new Error(`로고 위치 감지 실패 (${response.status})`);
+  const data = await response.json();
+  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  if (!parsed.found) return null;
+
+  // 값 방어: 모델이 범위를 벗어난 값을 줄 수 있으니 0~100 사이로 잘라줍니다.
+  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+  return { x: clamp(parsed.x), y: clamp(parsed.y), width: clamp(parsed.width), height: clamp(parsed.height) };
+}
+
+// 원본 이미지에서 region(%) 영역만 Canvas로 잘라 새 이미지(Blob)를 만듭니다.
+function cropImageToRegion(file, region) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const sx = (region.x / 100) * img.naturalWidth;
+        const sy = (region.y / 100) * img.naturalHeight;
+        const sw = (region.width / 100) * img.naturalWidth;
+        const sh = (region.height / 100) * img.naturalHeight;
+        const canvas = document.createElement("canvas");
+        canvas.width = sw;
+        canvas.height = sh;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("자르기 실패"))), "image/png");
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => reject(new Error("이미지 로드 실패"));
+    img.src = url;
+  });
+}
+
+// 잘라낸 로고가 너무 작으면(사진을 멀리서 찍은 경우 등) 명함에 쓰기엔 화질이
+// 부족할 수 있습니다. 정교한 블러 감지 대신, 가장 흔한 문제(해상도 부족)만 우선 확인합니다.
+const MIN_LOGO_DIMENSION = 200; // px — 이보다 작으면 명함 인쇄에 부적합할 가능성이 큼
+
+function checkImageQuality(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const ok = img.naturalWidth >= MIN_LOGO_DIMENSION && img.naturalHeight >= MIN_LOGO_DIMENSION;
+      resolve({ ok, width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ ok: false, width: 0, height: 0 });
+    };
+    img.src = url;
+  });
+}
+
+// 전체 과정을 하나로 묶은 진입점. 로고를 못 찾으면 null을 반환합니다 —
+// 이 경우 호출한 쪽에서 "직접 잘라서 다시 올려주세요" 같은 안내로 이어가면 됩니다.
+async function extractLogoFromPhoto(file) {
+  const region = await detectLogoRegion(file);
+  if (!region) return null;
+  const blob = await cropImageToRegion(file, region);
+  return new File([blob], `logo_${Date.now()}.png`, { type: "image/png" });
+}
+
+// ==================== domain/recommendation/index ====================
+// Recommendation Domain — "AI가 어떻게 생각하는가". 재료(Asset)와 규칙(Kernel)을
+// 조합해서 실제로 무엇을 추천할지 계산합니다. CP-002(제안): AI는 추천할 뿐 결정하지
+// 않는다 — 이 도메인의 결과는 항상 사용자가 수정할 수 있는 "제안"입니다.
+//
+// Recommendation Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   Phase 1 [x] industryDetector.js      — 회사명 → 업종 추정 (지금 여기)
+//   Phase 1 [x] recommendationCatalog.js — 추천 후보 목록
+//   Phase 1 [x] recommendationEngine.js  — 실제 추천 계산(AI 호출 + 캐시)
+//   Phase 2 [ ] recommendationRules.js   — "업종 X면 색상 Y" 같은 명시적 규칙표가 필요해지면
+//   Phase 3 [ ] recommendationScore.js   — 여러 후보를 동시에 점수 매겨 비교해야 할 때,
+//                                          또는 STEP 7 Learning이 붙어 통계 기반 점수가 생길 때
 
 // ==================== screens/Design ====================
 // Asset Domain(로고/색상/배경/스타일 태그 카탈로그)은 /domain/asset 로 분리됨 — "AI가 무엇을 고를 수 있는가"
@@ -5895,748 +6283,409 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
 
 // UploadBox, MAX_UPLOAD_MB: components/ui.js 로 이동 (Admin 화면에서도 공용으로 씀)
 
-// ==================== screens/Complete ====================
-const ORDER_STAGES = [
-  { k: "주문접수", icon: Check },
-  { k: "입금대기", icon: Landmark },
-  { k: "입금확인", icon: Check },
-  { k: "인쇄중", icon: Printer },
-  { k: "인쇄완료", icon: Package },
-  { k: "배송", icon: Truck },
-];
+// ==================== screens/Home ====================
+function useCountdown(hour) {
+  const [left, setLeft] = useState("00:00:00");
+  React.useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setHours(hour, 0, 0, 0);
+      let diff = cutoff - now;
+      if (diff < 0) diff += 24 * 3600 * 1000;
+      const h = String(Math.floor(diff / 3600000)).padStart(2, "0");
+      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, "0");
+      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, "0");
+      setLeft(`${h}:${m}:${s}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [hour]);
+  return left.split(":");
+}
 
-function Complete({ order, go, grandTotal, category }) {
-  const orderNo = order.orderNo || "-";
-  const [stage, setStage] = useState(0);
+function Home({ order, patch, go }) {
+  const [h, m, s] = useCountdown(18);
+  const catRef = React.useRef(null);
+
+  const openCategory = (code) => {
+    const changed = order.catCode !== code; // 실제로 카테고리가 바뀌었을 때만 하위 선택값 초기화
+    patch(changed
+      ? { catCode: code, paperCode: null, paperChoice: null, selOptions: {}, sets: 1 }
+      : { catCode: code });
+    go("paper");
+  };
+
   return (
     <div className="app-body">
-      <TopBar title={TEXTS.completeTitle} step={7} />
-      <div style={{ padding: "10px 18px 16px" }}>
-        <Card style={{ textAlign: "center", padding: "22px 16px", marginBottom: 14 }}>
+      <div style={{ padding: "20px 18px 4px", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <div style={{
-            width: 54, height: 54, borderRadius: "50%", background: "var(--stamp)", color: "#fff",
-            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px",
-            transform: "rotate(-6deg)",
-          }}>
-            <Check size={26} />
+            width: 38, height: 38, borderRadius: 12, flexShrink: 0,
+            background: "linear-gradient(135deg, var(--stamp), var(--stamp-2))",
+            color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13,
+          }}>AI</div>
+          <div>
+            <div className="serif" style={{ fontSize: 18, lineHeight: 1.2 }}>{TEXTS.appName}</div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.appTagline}</div>
           </div>
-          <div className="serif" style={{ fontSize: 16, fontWeight: 900 }}>{TEXTS.completeHeadline}</div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.orderNoLabel} {orderNo}</div>
-          <div style={{ fontSize: 18, fontWeight: 900, color: "var(--stamp)", marginTop: 10 }}>{won(grandTotal)}</div>
-        </Card>
-
-        {order.fileStorageNotice && (
-          <div style={{
-            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-            borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
-          }}>
-            {order.fileStorageNotice}
-          </div>
-        )}
-
-        <Card style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 14 }}>{TEXTS.orderStatusTitle}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", position: "relative" }}>
-            <div style={{ position: "absolute", top: 15, left: 20, right: 20, height: 1.5, background: "var(--line)" }} />
-            <div style={{ position: "absolute", top: 15, left: 20, height: 1.5, background: "var(--stamp)", width: `${(stage / (ORDER_STAGES.length - 1)) * 100}%`, maxWidth: "calc(100% - 40px)" }} />
-            {ORDER_STAGES.map((s, i) => {
-              const Icon = s.icon;
-              const active = i <= stage;
-              return (
-                <div key={s.k} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1, flex: 1 }}>
-                  <div style={{
-                    width: 30, height: 30, borderRadius: "50%", background: active ? "var(--stamp)" : "var(--paper-white)",
-                    border: `1.5px solid ${active ? "var(--stamp)" : "var(--line)"}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <Icon size={14} color={active ? "#fff" : "var(--ink-soft)"} />
-                  </div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: active ? "var(--ink)" : "var(--ink-soft)" }}>{s.k}</div>
-                </div>
-              );
-            })}
-          </div>
-          {stage < ORDER_STAGES.length - 1 && (
-            <button onClick={() => setStage((s) => Math.min(ORDER_STAGES.length - 1, s + 1))} style={{ ...stepperBtn, width: "100%", marginTop: 16, fontSize: 11.5, fontWeight: 700 }}>
-              {TEXTS.orderStatusPreviewBtn}
-            </button>
-          )}
-        </Card>
-
-        <Card>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{TEXTS.orderDetailsTitle}</div>
-          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
-          <SummaryRow k={TEXTS.orderNoLabel} v={orderNo} />
-        </Card>
+        </div>
+        <button onClick={() => go("admin")} style={{
+          display: "flex", alignItems: "center", gap: 5, background: "var(--paper-white)",
+          border: "1px solid var(--line)", borderRadius: 999, padding: "7px 12px", fontSize: 11.5,
+          fontWeight: 600, color: "var(--ink-soft)", cursor: "pointer", fontFamily: "inherit",
+        }}>
+          <Settings size={13} /> {TEXTS.adminButton}
+        </button>
       </div>
-      <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <PrimaryButton onClick={() => go("home")}>{TEXTS.goHomeBtn}</PrimaryButton>
-        <button
-          onClick={() => go("inquiry")}
+
+      <div style={{ padding: "16px 18px 0" }}>
+        <div
+          onClick={() => openCategory("cat01")}
           style={{
-            width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
-            borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit",
+            background: "linear-gradient(135deg, #6C4CF0, #4C6FFF)", borderRadius: 20, padding: "20px 20px 22px",
+            position: "relative", overflow: "hidden", cursor: "pointer",
           }}
         >
-          {TEXTS.inquiryBtn}
+          <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>{TEXTS.homeBannerLabel}</div>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "#fff", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+            {TEXTS.homeBannerTitle} <Zap size={17} color="#FFD65C" fill="#FFD65C" />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            {[[TEXTS.timeUnitHour, h], [TEXTS.timeUnitMinute, m], [TEXTS.timeUnitSecond, s]].map(([label, val], i) => (
+              <React.Fragment key={label}>
+                <div style={{ background: "rgba(15,15,40,0.35)", borderRadius: 10, padding: "8px 12px", textAlign: "center", minWidth: 46 }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{val}</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,0.75)", marginTop: 2 }}>{label}</div>
+                </div>
+                {i < 2 && <div style={{ color: "rgba(255,255,255,0.6)", fontWeight: 800, alignSelf: "center" }}>:</div>}
+              </React.Fragment>
+            ))}
+          </div>
+          <button style={{
+            marginTop: 16, background: "#fff", color: "var(--stamp)", border: "none", borderRadius: 999,
+            padding: "9px 16px", fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontFamily: "inherit",
+          }}>
+            {TEXTS.homeBannerCta} <ArrowLeft size={13} style={{ transform: "rotate(180deg)" }} />
+          </button>
+          <div style={{ position: "absolute", right: -6, top: 18, width: 96, height: 72 }}>
+            <div style={{ position: "absolute", right: 4, top: 16, width: 84, height: 52, borderRadius: 10, background: "#22346B", transform: "rotate(-8deg)" }} />
+            <div style={{
+              position: "absolute", right: 12, top: 0, width: 84, height: 52, borderRadius: 10, background: "#fff",
+              transform: "rotate(-8deg)", boxShadow: "0 8px 16px rgba(20,15,60,0.28)",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#3B2FBF" }}>AI STUDIO</div>
+              <div style={{ fontSize: 6, color: "#9C99B5", marginTop: 1 }}>Business Card Design</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 18px 0" }}>
+        <Card onClick={() => go("lookup")} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+          <div style={{ width: 32, height: 32, borderRadius: 10, background: "#EDEAFD", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
+            <PackageSearch size={16} color="#6C4CF0" />
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{TEXTS.lookupCardTitle}</div>
+          <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2, lineHeight: 1.4, whiteSpace: "pre-line" }}>{TEXTS.lookupCardDesc}</div>
+        </Card>
+        <Card
+          onClick={() => go(order.authed ? "lookup" : "auth")}
+          style={{ background: order.authed ? "var(--paper-white)" : "#FEF6E0", border: "none", display: "flex", flexDirection: "column", justifyContent: "space-between" }}
+        >
+          <div style={{ width: 32, height: 32, borderRadius: 10, background: order.authed ? "#EDEAFD" : "#FDECC0", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
+            {order.authed ? <UserCircle2 size={16} color="#6C4CF0" /> : <Gift size={16} color="#DB9E1E" />}
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{order.authed ? TEXTS.memberWelcome(order.name) : TEXTS.memberCardTitleGuest}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+            <div style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{order.authed ? (order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral) : TEXTS.guestSignupHint}</div>
+            {!order.authed && (
+              <span style={{ background: "#FFCE3D", color: "#5C3E00", fontSize: 10.5, fontWeight: 700, padding: "4px 9px", borderRadius: 999 }}>{TEXTS.loginBadge}</span>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div ref={catRef} style={{ padding: "22px 18px 6px" }}>
+        <div style={{ fontSize: 15, fontWeight: 800 }}>{TEXTS.categorySectionTitle}</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "8px 18px 20px" }}>
+        {CATEGORIES.map((c) => {
+          const Icon = c.icon;
+          return (
+            <Card key={c.code} onClick={() => openCategory(c.code)}>
+              <div style={{ width: 32, height: 32, borderRadius: 10, background: c.iconBg, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
+                <Icon size={16} color={c.iconFg} />
+              </div>
+              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.name}</div>
+              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>{c.tagline}</div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <BottomNav active="home" order={order} go={go} scrollToCategories={() => catRef.current?.scrollIntoView({ behavior: "smooth" })} />
+    </div>
+  );
+}
+
+function BottomNav({ active, order, go, scrollToCategories }) {
+  const items = [
+    { k: "home", label: TEXTS.navHome, icon: HomeIcon, onClick: () => go("home") },
+    { k: "order", label: TEXTS.navOrder, icon: ClipboardList, onClick: scrollToCategories || (() => go("home")) },
+    { k: "lookup", label: TEXTS.navHistory, icon: Package, onClick: () => go("lookup") },
+    { k: "auth", label: order.authed ? TEXTS.navMy : TEXTS.navLogin, icon: User, onClick: () => go(order.authed ? "lookup" : "auth") },
+  ];
+  return (
+    <div style={{
+      position: "sticky", bottom: 0, background: "var(--paper-white)", borderTop: "1px solid var(--line)",
+      display: "flex", padding: "10px 6px 12px",
+    }}>
+      {items.map((it) => {
+        const Icon = it.icon;
+        const isActive = it.k === active;
+        return (
+          <button key={it.k} onClick={it.onClick} style={{
+            flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+            background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+            color: isActive ? "var(--stamp)" : "var(--ink-soft)",
+          }}>
+            <Icon size={19} />
+            <span style={{ fontSize: 10.5, fontWeight: 600 }}>{it.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function OrderLookup({ order, patch, go }) {
+  const [phone, setPhone] = useState("");
+  const [searched, setSearched] = useState(false);
+  const [found, setFound] = useState(null); // 조회된 실제 주문 기록 (없으면 null)
+  const [searching, setSearching] = useState(false);
+
+  const handleSearch = async () => {
+    if (!phone.trim()) return;
+    setSearching(true);
+    setSearched(false);
+    try {
+      // 2026-08-04: 실제 서버(Render+Supabase)로 옮겼습니다 — 이전엔 window.storage라
+      // 이 계정으로 테스트하는 동안만 보이던 것이, 이제 실제 데이터베이스 조회입니다.
+      // ⚠️ 아직 남은 한계: 인쇄파일(SVG)·특별회원 업로드 파일은 서버에 저장되지
+      // 않아서(다음 단계), design_recipe가 있는 주문만 "재주문"이 가능합니다.
+      setFound(await lookupOrdersByPhone(phone.trim()));
+    } catch {
+      setFound(null);
+    } finally {
+      setSearching(false);
+      setSearched(true);
+    }
+  };
+
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.lookupTitle} onBack={() => go("home")} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <Field label={TEXTS.lookupFieldLabel}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...inputStyle, flex: 1 }} placeholder={TEXTS.phonePlaceholder} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <button onClick={handleSearch} disabled={searching} style={{ ...stepperBtn, width: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Search size={16} />
+            </button>
+          </div>
+        </Field>
+
+        {searched && !found && (
+          <Card><div style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{TEXTS.lookupNotFound}</div></Card>
+        )}
+        {searched && found && (
+          <Card>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.lookupRecentOrder}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{found.categoryName || TEXTS.lookupOrderItem}</div>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>{found.name}님 · {found.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral}</div>
+                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.orderNoLabel}: {found.orderNo}</div>
+              </div>
+              <Badge label={TEXTS.lookupPrintingBadge} tone="purple" />
+            </div>
+            {(found.printFileSvg || found.specialOrderFile || found.designRecipe) && (
+              <button
+                onClick={() => {
+                  // 재주문 = 다시 디자인하는 게 아니라, 저장해둔 그 인쇄파일을 그대로
+                  // 다시 결제로 넘기는 것입니다 — 디자인 화면을 아예 건너뜁니다.
+                  patch({
+                    printFileSvg: found.printFileSvg || null,
+                    printFileName: `reorder-${found.orderNo}.svg`,
+                    specialOrderFile: found.specialOrderFile || null,
+                    designRecipe: found.designRecipe || null,
+                    memberType: found.memberType,
+                  });
+                  go("shipping");
+                }}
+                style={{
+                  width: "100%", marginTop: 12, background: "var(--stamp)", border: "none", color: "#fff",
+                  borderRadius: 10, fontSize: 13, fontWeight: 700, padding: "11px 0", cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {TEXTS.reorderNowBtn}
+              </button>
+            )}
+            <button
+              onClick={() => go("inquiry")}
+              style={{
+                width: "100%", marginTop: 8, background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
+                borderRadius: 10, fontSize: 12.5, fontWeight: 700, padding: "10px 0", cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              {TEXTS.inquiryBtn}
+            </button>
+          </Card>
+        )}
+      </div>
+      <div style={{ marginTop: "auto" }}>
+        <BottomNav active="lookup" order={order} go={go} />
+      </div>
+    </div>
+  );
+}
+
+// ==================== screens/Inquiry ====================
+// 주문별 1:1 문의(수정요청) 스레드 저장.
+// 스타일 캐시와 달리 이건 개인 요청 내용이라 shared:false(본인만 보는 저장소)를 씁니다.
+// 실제 서비스에서는 고객·관리자가 서로 다른 사람이라 이렇게 하면 관리자가 못 보게 되므로,
+// 반드시 진짜 백엔드(고객 계정 ↔ 관리자 계정이 같은 스레드를 보는 구조)로 옮겨야 합니다.
+// 지금은 프로토타입이라 "관리자 답변"도 같은 사용자가 미리보기 버튼으로 흉내냅니다.
+async function loadInquiryThread(orderNo) {
+  try {
+    const res = await window.storage.get(`inquiry:${orderNo}`, false);
+    return res?.value ? JSON.parse(res.value) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveInquiryThread(orderNo, messages) {
+  try {
+    await window.storage.set(`inquiry:${orderNo}`, JSON.stringify(messages), false);
+  } catch {
+    // 저장 실패해도 화면에는 이미 반영돼 있으므로 조용히 무시
+  }
+}
+
+function Inquiry({ order, go, back }) {
+  const orderNo = order.orderNo || "BC24110032"; // 실제 주문이 없을 때(데모 조회)는 예시 주문번호 사용
+  const [messages, setMessages] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = React.useRef(null);
+
+  React.useEffect(() => {
+    let active = true;
+    loadInquiryThread(orderNo).then((msgs) => {
+      if (active) { setMessages(msgs); setLoaded(true); }
+    });
+    return () => { active = false; };
+  }, [orderNo]);
+
+  React.useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const appendMessage = async (sender, content) => {
+    const next = [...messages, { sender, text: content, at: Date.now() }];
+    setMessages(next);
+    await saveInquiryThread(orderNo, next);
+  };
+
+  const handleSend = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setText("");
+    await appendMessage("customer", trimmed);
+    setSending(false);
+  };
+
+  const handlePreviewAdminReply = async () => {
+    await appendMessage("admin", TEXTS.inquiryDemoAdminReply);
+  };
+
+  return (
+    <div className="app-body" style={{ display: "flex", flexDirection: "column" }}>
+      <TopBar title={TEXTS.inquiryTitle} sub={`${TEXTS.inquiryOrderNoPrefix} ${orderNo}`} onBack={back} go={go} />
+
+      <div style={{ padding: "6px 18px 4px" }}>
+        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10 }}>{TEXTS.inquiryPrivacyNote}</div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {loaded && messages.length === 0 && (
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", padding: "24px 10px" }}>{TEXTS.inquiryEmpty}</div>
+        )}
+        {messages.map((m, i) => {
+          const isCustomer = m.sender === "customer";
+          return (
+            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCustomer ? "flex-end" : "flex-start" }}>
+              <div style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 3, padding: "0 4px" }}>
+                {isCustomer ? TEXTS.inquiryCustomerLabel : TEXTS.inquiryAdminLabel}
+              </div>
+              <div style={{
+                maxWidth: "78%", padding: "10px 13px", borderRadius: 14,
+                borderBottomRightRadius: isCustomer ? 4 : 14,
+                borderBottomLeftRadius: isCustomer ? 14 : 4,
+                background: isCustomer ? "var(--stamp)" : "var(--paper-white)",
+                color: isCustomer ? "#fff" : "var(--ink)",
+                border: isCustomer ? "none" : "1.5px solid var(--line)",
+                fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {m.text}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      <div style={{ padding: "12px 18px 6px" }}>
+        <div style={{ fontSize: 10, color: "var(--ink-soft)", textAlign: "center", marginBottom: 6 }}>{TEXTS.inquiryPreviewNote}</div>
+        <button
+          onClick={handlePreviewAdminReply}
+          style={{
+            width: "100%", background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
+            borderRadius: 10, fontSize: 12, fontWeight: 700, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
+          }}
+        >
+          {TEXTS.inquiryPreviewReplyBtn}
+        </button>
+      </div>
+
+      <div style={{ padding: "0 18px 18px", display: "flex", gap: 8 }}>
+        <input
+          style={{ ...inputStyle, flex: 1 }}
+          placeholder={TEXTS.inquiryPlaceholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={!text.trim() || sending}
+          style={{
+            width: 64, borderRadius: 10, border: "none",
+            background: text.trim() ? "var(--stamp)" : "var(--line)",
+            color: text.trim() ? "#fff" : "var(--ink-soft)",
+            fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", fontFamily: "inherit",
+          }}
+        >
+          {TEXTS.inquirySendBtn}
         </button>
       </div>
     </div>
-  );
-}
-
-// ==================== domain/company/orderNotification ====================
-// ====================================================================
-// Domain : Company / Order Notification
-// Responsibility : 새 주문이 들어오면 관리자(goodplus.kr@gmail.com)에게 이메일로
-//                  알려줍니다. emailVerification.js(회사 이메일 소유 확인)와는
-//                  완전히 다른 기능입니다 — 저건 사용자가 입력한 이메일 주소가
-//                  진짜 자기 것인지 확인하는 용도이고, 이건 사장님 본인에게
-//                  "주문이 들어왔다"를 알리는 용도입니다. 서로 다른 EmailJS 템플릿을
-//                  씁니다(변수가 다름: 이쪽은 {{name}}/{{message}}/{{order_id}}).
-//
-// 여기 SERVICE_ID/TEMPLATE_ID는 자리표시자가 아니라, 예전 세션에서 실제로 테스트
-// 발송까지 확인된 값입니다(2026-07-29, service_c48f848 / template_fgijlbe,
-// Gmail 수신 확인됨). 다만 "To Email"은 코드가 아니라 EmailJS 템플릿 자체 설정에
-// 고정되어 있어서(goodplus.kr@gmail.com), 여기서 template_params로 보내지 않습니다.
-// ====================================================================
-const ORDER_EMAILJS_SERVICE_ID = "service_c48f848";
-const EMAILJS_ORDER_TEMPLATE_ID = "template_fgijlbe";
-// PUBLIC_KEY도 emailVerification.js와 같은 EmailJS 계정 값으로 확인됐습니다.
-const ORDER_EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
-
-// order 객체에서 사람이 읽기 좋은 주문 요약 텍스트를 만듭니다. 어떤 필드가 정확히
-// 있는지는 App.jsx의 order 상태 모양을 따릅니다 — 없는 필드는 조용히 건너뜁니다.
-function buildOrderSummary(order, extra = {}) {
-  const lines = [
-    extra.categoryName && `카테고리: ${extra.categoryName}`,
-    extra.paperName && `용지: ${extra.paperName}`,
-    order.sets && `수량: ${order.sets}세트`,
-    extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
-    extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
-    order.depositor && `입금자명: ${order.depositor}`,
-    order.ship?.name && `받는분: ${order.ship.name}`,
-    order.ship?.phone && `연락처: ${order.ship.phone}`,
-    order.ship?.addr && `주소: ${order.ship.addr}`,
-    // 뒷면을 "직접 설명하기"로 고른 경우, 정해진 템플릿 없이 담당자가 직접 만들어야
-    // 하므로 그 설명을 반드시 여기 남깁니다 — 첨부는 앞면 파일 하나만 가는 구조라서
-    // (아래 한계 참고), 참고 이미지를 올렸다면 그 사실도 같이 알려줍니다.
-    order.backCustomNote && `\n[뒷면 직접 요청]\n${order.backCustomTags?.length ? `희망 내용: ${order.backCustomTags.join(", ")}\n` : ""}${order.backCustomNote}`,
-    order.backCustomFile && `(뒷면 참고 이미지 첨부됨 — 파일명: ${order.backCustomFile.name}. 첨부 슬롯은 앞면 파일과 공유라 안 붙었을 수 있어요, 확인 필요)`,
-  ].filter(Boolean);
-  return lines.join("\n");
-}
-
-// 파일을 base64로 바꿉니다 — 이메일 첨부와 window.storage 저장 둘 다 이 형태가 필요해서
-// 이름을 용도 하나에 묶지 않고 범용으로 둡니다.
-function fileToBase64DataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// window.storage는 텍스트 전용, 한 값당 5MB 제한입니다. base64로 바꾸면 원본보다
-// 커지므로(약 1.33배), 원본 기준 이 크기까지만 저장을 "시도"합니다. 저장은 의무가
-// 아니라 재주문 편의를 위한 정책일 뿐이라, 안 되면 강제로 방법을 찾지 않고 그냥
-// "용량이 커서 저장이 안 된다"고 안내하고 넘어갑니다.
-const MAX_STORABLE_FILE_BYTES = 3 * 1024 * 1024;
-
-// ⚠️ 설정 필요: EmailJS에서 첨부파일 발송은 유료 플랜에서만 됩니다(2026-07-30 기준
-// 공식 문서 확인). 그리고 템플릿의 Attachments 탭에 "Variable Attachment" 타입으로
-// 파라미터 이름(예: attachment)을 등록해둬야, 여기서 보내는 값이 실제로 첨부됩니다 —
-// 코드만으로는 안 되고 EmailJS 대시보드에서 템플릿 설정을 한 번 해주셔야 합니다.
-//
-// attachment는 File 객체(특별회원이 올린 파일)이거나, { dataUrl } 형태로 이미 계산된
-// base64(AI가 만든 인쇄용 SVG — 이미 텍스트라 File로 감쌀 필요 없이 바로 씀)일 수 있습니다.
-async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment = null) {
-  const message = buildOrderSummary(order, extra);
-  const templateParams = {
-    name: order.ship?.name || order.depositor || "고객",
-    message,
-    order_id: orderNo,
-  };
-  if (attachment) {
-    try {
-      templateParams.attachment = attachment.dataUrl ? attachment.dataUrl : await fileToBase64DataUrl(attachment);
-    } catch {
-      // 첨부 변환에 실패해도 주문 알림 이메일 자체는 보내야 하므로 무시하고 진행
-    }
-  }
-  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: ORDER_EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_ORDER_TEMPLATE_ID,
-      user_id: ORDER_EMAILJS_PUBLIC_KEY,
-      template_params: templateParams,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`주문 알림 이메일 발송 실패 (${res.status})`);
-  }
-}
-
-// ==================== screens/Payment ====================
-function Payment({ order, patch, go, back, paper, category, unit, optTotal, shipFee, goodsTotal, grandTotal }) {
-  const [agreedTerms, setAgreedTerms] = useState(false);
-  const [validationMsg, setValidationMsg] = useState("");
-  const [highlightTerms, setHighlightTerms] = useState(false);
-  const depositorRef = React.useRef(null);
-  const termsBoxRef = React.useRef(null);
-  const optLines = Object.entries(order.selOptions)
-    .map(([code, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === code), sel))
-    .filter(Boolean);
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.paymentTitle} onBack={back} step={6} go={go} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <Card style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.orderSummaryTitle}</div>
-          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
-          <SummaryRow k={TEXTS.summaryPaperLabel} v={paper?.name} />
-          {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
-          <SummaryRow k={TEXTS.summaryOptionLabel} v={optLines.length ? optLines.join(", ") : TEXTS.summaryNone} />
-          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
-          <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
-        </Card>
-
-        <Card style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
-          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
-          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
-          <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
-          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 14, fontWeight: 900 }}>{TEXTS.grandTotalLabel}</span>
-            <span style={{ fontSize: 17, fontWeight: 900, color: "var(--stamp)" }}>{won(grandTotal)}</span>
-          </div>
-        </Card>
-
-        <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 12 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <Landmark size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{TEXTS.bankInfoTitle}</div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.bankAccount}</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.bankHolder}</div>
-            </div>
-          </div>
-        </Card>
-
-        <Field label={TEXTS.depositorLabel}><input ref={depositorRef} style={inputStyle} value={order.depositor} onChange={(e) => patch({ depositor: e.target.value })} placeholder={TEXTS.depositorPlaceholder} /></Field>
-
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 10, lineHeight: 1.5 }}>{TEXTS.cmykColorNotice}</div>
-
-        {/* 2026-08-04: "체크를 해야 버튼이 눌리는데, 그걸 몰랐다"는 신고 반영 —
-            기존엔 옅은 회색 글씨 + 작은 체크박스뿐이라 눈에 잘 안 띄었습니다.
-            제목이 있는 박스로 감싸서 "여기 뭔가 확인할 게 있다"는 게 먼저
-            눈에 들어오게 했습니다. */}
-        <div
-          ref={termsBoxRef}
-          onClick={() => { setAgreedTerms((v) => !v); setValidationMsg(""); }}
-          style={{
-            marginTop: 14, padding: "12px 14px", borderRadius: 12, cursor: "pointer",
-            border: `${highlightTerms ? 2.5 : 1.5}px solid ${agreedTerms ? "var(--stamp)" : "#F0B429"}`,
-            background: agreedTerms ? "rgba(108,76,240,0.05)" : "#FFFBEB",
-            boxShadow: highlightTerms ? "0 0 0 4px rgba(240,180,41,0.35)" : "none",
-            transition: "box-shadow 0.3s, border-width 0.2s",
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 800, color: agreedTerms ? "var(--stamp)" : "#B45309", marginBottom: 6 }}>
-            {TEXTS.termsAgreementBoxTitle}
-          </div>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <div style={{
-              width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0,
-              border: `1.5px solid ${agreedTerms ? "var(--stamp)" : "var(--line)"}`,
-              background: agreedTerms ? "var(--stamp)" : "#fff",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              {agreedTerms && <Check size={12} color="#fff" />}
-            </div>
-            <span style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>{TEXTS.termsLogoLiabilityLabel}</span>
-          </div>
-        </div>
-      </div>
-      <div style={{ padding: "8px 18px 18px" }}>
-        {validationMsg && (
-          <div style={{
-            fontSize: 12, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-            borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontWeight: 700, textAlign: "center",
-          }}>
-            {validationMsg}
-          </div>
-        )}
-        <PrimaryButton
-          looksDisabled={!order.depositor || !agreedTerms}
-          icon={CreditCard}
-          onClick={async () => {
-            // 2026-08-07: "체크박스를 못 찾아서 버튼이 안 눌린다"는 신고 반영 —
-            // 예전엔 조건이 안 맞으면 버튼 자체가 브라우저 disabled 상태라 눌러도
-            // 아무 반응이 없었습니다(React onClick조차 안 불림). 이제 버튼은 항상
-            // 눌리고, 조건이 안 맞으면 뭐가 문제인지 알려주고 그 위치로 화면을
-            // 이동시켜서 스스로 원인을 못 찾는 일이 없게 했습니다.
-            if (!order.depositor) {
-              setValidationMsg(TEXTS.paymentMissingDepositor);
-              depositorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-              depositorRef.current?.focus();
-              return;
-            }
-            if (!agreedTerms) {
-              setValidationMsg(TEXTS.paymentMissingAgreement);
-              termsBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-              setHighlightTerms(true);
-              setTimeout(() => setHighlightTerms(false), 1500);
-              return;
-            }
-            setValidationMsg("");
-            // 실제 서비스에서는 이 주문번호를 서버가 발급해야 합니다.
-            // 지금은 프론트엔드 프로토타입이라 임시로 생성하고, 새로고침 전까지는 값이 바뀌지 않도록 order 상태에 저장해둡니다.
-            const orderNo = `BC${Date.now().toString().slice(-8)}`;
-            patch({ orderNo });
-            // 2026-08-04: 예전에 여기 있던 window.storage 기록(orderByPhone)을 지웠습니다 —
-            // Home.jsx의 "내 주문 조회"가 이제 실제 서버를 조회하므로, 이 기록을 읽는
-            // 코드가 더 이상 없어서 그대로 두면 아무 효과 없이 개인정보만 남기는
-            // 죽은 코드였습니다. ⚠️ 다만 이 기록에만 있던 printFileSvg(인쇄파일)·
-            // specialOrderFile(특별회원 업로드 파일)은 서버 쪽에 아직 저장할 곳이
-            // 없어서, 지금은 재주문 시 "저장된 파일 그대로" 가져오는 기능 자체가
-            // 없습니다 — design_recipe가 있는 주문만 그 설계도로 다시 만들 수 있습니다
-            // (Supabase Storage 연동 전까지의 알려진 한계).
-            // 2026-08-04: 실제 서버(Render+Supabase)가 배포되면서 recordNewOrder가
-            // 진짜 데이터베이스에 저장합니다. 이 저장은 실패해도 결제 접수 자체를
-            // 막으면 안 되므로(서버가 잠깐 응답 없거나 일시적 오류가 나도 고객은
-            // 정상적으로 다음 화면으로 넘어가야 함), await 없이 그대로 흘려보냅니다.
-            recordNewOrder(orderNo, {
-              customerPhone: order.ship?.phone?.trim(), customerName: order.ship?.name || order.name,
-              categoryCode: category?.code, paperCode: order.paperCode, paperChoice: order.paperChoice,
-              options: order.selOptions, sets: order.sets, memberType: order.memberType,
-              amountTotal: grandTotal, depositorName: order.depositor, shipping: order.ship,
-              designRecipe: order.designRecipe || null,
-            }).catch((err) => console.error("관리자 주문 기록 저장 실패:", err));
-            // 이메일 발송 실패가 주문 접수 자체를 막으면 안 되므로, 실패해도 무시하고
-            // 화면은 그대로 진행합니다 — 관리자 알림이 안 갔다고 고객의 주문을 막는 건
-            // 우선순위가 거꾸로입니다.
-            // 첨부는 둘 중 하나입니다: AI로 디자인했으면 방금 만든 인쇄용 SVG,
-            // 특별회원이면 직접 올린 파일. 이제 결제만 되면 실제 인쇄 파일이 관리자
-            // 이메일로 갑니다 — 지금까지 없던, 가장 중요한 마지막 단계입니다.
-            const attachment = order.printFileSvg
-              ? { dataUrl: svgToDataUrl(order.printFileSvg) }
-              : (order.specialOrderFile || null);
-            sendOrderNotificationEmail(order, orderNo, {
-              categoryName: category?.name, paperName: paper?.name,
-              optionsSummary: optLines.length ? optLines.join(", ") : null,
-              totalPrice: grandTotal,
-            }, attachment).catch((err) => console.error("주문 알림 이메일 발송 실패:", err));
-            go("complete");
-          }}
-        >
-          {TEXTS.paymentSubmitBtn}
-        </PrimaryButton>
-      </div>
-    </div>
-  );
-}
-
-// ==================== screens/Admin ====================
-// 아주 가벼운 비밀번호 게이트입니다 — 진짜 권한 시스템(관리자 계정 로그인)이 아닙니다.
-// 실제 서비스에서는 Auth 화면의 관리자 로그인과 연결해야 합니다. 지금은 프로토타입이라
-// 브라우저에 하드코딩된 값과 비교만 합니다 — 이 비밀번호는 보안 장치가 아니라
-// "일반회원이 실수로 들어오는 것"을 막는 정도의 문턱입니다.
-// 2026-08-04: 비밀번호 확인이 이제 서버(Render)에서 이뤄집니다 — 여기 있던 하드코딩된
-// 값은 더 이상 안 쓰입니다. 실제 관리자 비밀번호는 Render 환경변수 ADMIN_PASSWORD에
-// 있습니다.
-
-function Admin({ go, back }) {
-  const [authed, setAuthed] = useState(false);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [companies, setCompanies] = useState([]);
-  const [busyId, setBusyId] = useState(null);
-  // 2026-08-04: 실제 서버 로그인이 되면서 추가 — 서버가 발급한 서명된 토큰을 여기
-  // 담아둡니다(브라우저를 새로고침하면 사라짐 — 이 미리보기 환경에선 localStorage를
-  // 못 쓰기 때문에 의도적으로 메모리에만 둡니다. 그래서 새로고침하면 재로그인 필요,
-  // 이건 이전(비밀번호만 확인) 방식과 동일한 제약입니다).
-  const [adminToken, setAdminToken] = useState(null);
-  const [loginBusy, setLoginBusy] = useState(false);
-  // 2026-08-02: 이 두 줄은 원래 아래 "if (!authed) return (...)" 다음에 있었습니다 —
-  // 그러면 로그인 전(authed=false)에는 이 useState들이 아예 호출이 안 되고, 로그인
-  // 후(authed=true)에만 호출되어서 같은 컴포넌트인데 렌더마다 훅 호출 개수가
-  // 달라지는 문제(Rules of Hooks 위반)가 있었습니다. 지금까지는 우연히 문제가
-  // 안 드러났을 수 있지만, 원칙대로 모든 훅은 조건 분기보다 위, 맨 앞에서
-  // 무조건 호출되어야 해서 여기로 옮겼습니다.
-  const [showRegisterForm, setShowRegisterForm] = useState(false);
-  const [registerResult, setRegisterResult] = useState("");
-  // 2026-08-02: 관리자가 실제로 "입금확인"을 할 수 있는 기능 — 주문 목록 상태.
-  const [orders, setOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [busyOrderNo, setBusyOrderNo] = useState(null);
-
-  useEffect(() => {
-    if (!authed) return;
-    (async () => {
-      await loadCompanyLibrary(); // 이전 세션에 저장된 것들까지 다 불러온 뒤에 목록을 만듭니다.
-      setCompanies([...COMPANY_DOMAIN]);
-      setLoading(false);
-    })();
-  }, [authed]);
-
-  const refreshOrders = async () => {
-    setOrdersLoading(true);
-    try {
-      setOrders(await listOrders(adminToken));
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
-  useEffect(() => {
-    if (!authed) return;
-    refreshOrders();
-  }, [authed]);
-
-  const handleConfirmDeposit = async (orderNo) => {
-    setBusyOrderNo(orderNo);
-    try {
-      await confirmDeposit(orderNo, adminToken);
-      await refreshOrders();
-    } catch (err) {
-      console.error("입금확인 처리 실패:", err);
-    } finally {
-      setBusyOrderNo(null);
-    }
-  };
-
-  const refresh = () => setCompanies([...COMPANY_DOMAIN]);
-
-  const handleApprove = async (id) => {
-    setBusyId(id);
-    await updateCompanyStatus(id, "verified", { approvedBy: "admin", token: adminToken });
-    refresh();
-    setBusyId(null);
-  };
-
-  const handleReject = async (id) => {
-    setBusyId(id);
-    await removeCompany(id, adminToken);
-    refresh();
-    setBusyId(null);
-  };
-
-  if (!authed) {
-    return (
-      <div className="app-body">
-        <TopBar title={TEXTS.adminLoginTitle} onBack={back} go={go} />
-        <div style={{ padding: "16px 18px" }}>
-          <input
-            style={inputStyle}
-            type="password"
-            placeholder={TEXTS.adminPasswordPlaceholder}
-            value={passwordInput}
-            onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(""); }}
-          />
-          {passwordError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 8 }}>{passwordError}</div>}
-          <div style={{ marginTop: 14 }}>
-            <PrimaryButton
-              disabled={!passwordInput || loginBusy}
-              onClick={async () => {
-                setLoginBusy(true);
-                setPasswordError("");
-                try {
-                  const token = await adminLogin(passwordInput);
-                  setAdminToken(token);
-                  setAuthed(true);
-                } catch (err) {
-                  setPasswordError(err.message || TEXTS.adminPasswordWrong);
-                } finally {
-                  setLoginBusy(false);
-                }
-              }}
-            >
-              {TEXTS.adminLoginBtn}
-            </PrimaryButton>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const handleRegister = async (formData) => {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(formData.file);
-    });
-    const splitList = (str) => str.split(",").map((s) => s.trim()).filter(Boolean);
-    const result = await registerCompany({
-      name: formData.name,
-      aliases: splitList(formData.aliases),
-      logo: dataUrl,
-      logoType: formData.logoType,
-      industry: formData.industry || null,
-      homepage: formData.homepage || null,
-      officialLogoUrl: formData.officialLogoUrl || null,
-      emailDomains: splitList(formData.emailDomains),
-      source: "admin_registered", // 관리자가 직접 등록 → 기본 status: verified, qualityGrade: B
-    });
-    refresh();
-    if (result.registered) {
-      setRegisterResult(TEXTS.adminRegisterSuccess(result.company.name));
-      setShowRegisterForm(false);
-    } else if (result.mergedAlias) {
-      setRegisterResult(TEXTS.adminRegisterMerged(result.company.name));
-    } else {
-      setRegisterResult(TEXTS.adminRegisterDuplicate(result.company.name));
-    }
-  };
-
-  const pending = companies.filter((c) => c.status === "pending");
-  const others = companies.filter((c) => c.status !== "pending");
-
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.adminReviewTitle} onBack={back} go={go} />
-      <div style={{ padding: "16px 18px" }}>
-        {/* 2026-08-02 신규: 실제로 입금확인을 처리할 수 있는 주문 관리 섹션.
-            ⚠️ 지금은 Complete.jsx(고객이 보는 화면)가 아직 이 실제 상태를 안 읽고
-            예전 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 테스트 흐름이 막히지
-            않게 하기 위한 의도적 선택입니다. 실 서비스 전환 전 반드시 연결할 것
-            (PROJECT_HANDOFF.md에 기록됨). */}
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
-          {TEXTS.adminOrdersSectionTitle} ({orders.filter((o) => o.status !== ORDER_STATUS.CONFIRMED).length})
-        </div>
-        {ordersLoading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
-        {!ordersLoading && orders.length === 0 && (
-          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoOrders}</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-          {orders.map((o) => {
-            const confirmed = o.status === ORDER_STATUS.CONFIRMED;
-            return (
-              <Card key={o.orderNo}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{o.orderNo}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 3 }}>{TEXTS.adminOrderDepositorLine(o.depositor, o.categoryName)}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.adminOrderAmountLine(o.grandTotal)}</div>
-                  </div>
-                  <div style={{
-                    fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, flexShrink: 0,
-                    color: confirmed ? "var(--stamp)" : "#B45309",
-                    background: confirmed ? "rgba(108,76,240,0.1)" : "#FEF3C7",
-                  }}>
-                    {o.status}
-                  </div>
-                </div>
-                {!confirmed && (
-                  <button
-                    disabled={busyOrderNo === o.orderNo}
-                    onClick={() => handleConfirmDeposit(o.orderNo)}
-                    style={{
-                      width: "100%", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                      padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)",
-                      color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
-                    }}
-                  >
-                    <Check size={14} /> {TEXTS.adminConfirmDepositBtn}
-                  </button>
-                )}
-                {confirmed && o.confirmedAt && (
-                  <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6 }}>
-                    {TEXTS.adminApprovalRecord(o.confirmedBy || "admin", o.confirmedAt)}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* 이메일 발송 자체(EmailJS 연동)가 되는지 회사 인증 절차 없이 확인하는
-            관리자 전용 도구. 회사메일이 없어도 테스트할 수 있게 해주던 "테스트회사"
-            (gmail.com) 항목은 이제 지웠습니다 — verifyCompanyEmail이 개인 이메일
-            도메인을 아예 거부하도록 막아서 그 방법 자체가 더 안 통합니다. 대신 여기서는
-            회사 인증 로직을 거치지 않고 sendVerificationEmail을 직접 호출하기 때문에,
-            보안 구멍을 만들지 않으면서 "발송이 실제로 되는가"만 확인할 수 있습니다.
-            이미 관리자 비밀번호로 접근이 막혀있는 화면이라 안전합니다. */}
-        <EmailSendTestTool />
-        <div style={{ marginBottom: 20 }}>
-          <button
-            onClick={() => { setShowRegisterForm((v) => !v); setRegisterResult(""); }}
-            style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: showRegisterForm ? "var(--stamp)" : "var(--paper-white)", color: showRegisterForm ? "#fff" : "var(--stamp)", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
-          >
-            {showRegisterForm ? TEXTS.adminRegisterCloseBtn : TEXTS.adminRegisterOpenBtn}
-          </button>
-          {showRegisterForm && <RegisterForm onSubmit={handleRegister} />}
-          {registerResult && <div style={{ fontSize: 12, color: "var(--stamp)", marginTop: 8 }}>{registerResult}</div>}
-        </div>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
-          {TEXTS.adminPendingSectionTitle} ({pending.length})
-        </div>
-        {loading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
-        {!loading && pending.length === 0 && (
-          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoPending}</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-          {pending.map((c) => (
-            <Card key={c.id}>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                {c.logo && (
-                  <img src={c.logo} alt="" style={{ width: 48, height: 48, objectFit: "contain", background: "var(--paper-deep)", borderRadius: 8, flexShrink: 0 }} />
-                )}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.name} <span style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 700 }}>{c.qualityGrade}등급</span></div>
-                  <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.adminSourceLabel(c.source)}</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button
-                  disabled={busyId === c.id}
-                  onClick={() => handleApprove(c.id)}
-                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)", color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
-                >
-                  <Check size={14} /> {TEXTS.adminApproveBtn}
-                </button>
-                <button
-                  disabled={busyId === c.id}
-                  onClick={() => handleReject(c.id)}
-                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--line)", background: "var(--paper-white)", color: "#d64545", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
-                >
-                  <X size={14} /> {TEXTS.adminRejectBtn}
-                </button>
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        {others.length > 0 && (
-          <>
-            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.adminOthersSectionTitle}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {others.map((c) => (
-                <div key={c.id} style={{ display: "flex", flexDirection: "column", padding: "8px 4px", fontSize: 12, borderBottom: "1px solid var(--line)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>{c.name}</span>
-                    <span style={{ color: "var(--ink-soft)" }}>{c.status}</span>
-                  </div>
-                  {c.approvedBy && (
-                    <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 2 }}>
-                      {TEXTS.adminApprovalRecord(c.approvedBy, c.approvedAt)}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// 관리자 전용, 회사 인증 로직 없이 EmailJS 발송 자체만 테스트합니다.
-function EmailSendTestTool() {
-  const [testEmail, setTestEmail] = useState("");
-  const [status, setStatus] = useState(null); // null | "sending" | "sent" | "error"
-  const [errorMsg, setErrorMsg] = useState("");
-
-  const handleTestSend = async () => {
-    setStatus("sending");
-    setErrorMsg("");
-    try {
-      const code = generateVerificationCode();
-      await sendVerificationEmail(testEmail, code);
-      setStatus("sent");
-    } catch (err) {
-      setStatus("error");
-      setErrorMsg(err.message || String(err));
-    }
-  };
-
-  return (
-    <Card style={{ marginBottom: 20, background: "var(--paper-deep)", border: "none" }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.adminEmailTestTitle}</div>
-      <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>{TEXTS.adminEmailTestDesc}</div>
-      <input
-        style={inputStyle}
-        type="email"
-        placeholder={TEXTS.adminEmailTestPlaceholder}
-        value={testEmail}
-        onChange={(e) => { setTestEmail(e.target.value); setStatus(null); }}
-      />
-      <div style={{ marginTop: 10 }}>
-        <PrimaryButton disabled={!testEmail || status === "sending"} onClick={handleTestSend}>
-          {status === "sending" ? TEXTS.adminEmailTestSending : TEXTS.adminEmailTestBtn}
-        </PrimaryButton>
-      </div>
-      {status === "sent" && <div style={{ fontSize: 11.5, color: "var(--stamp)", marginTop: 8, fontWeight: 600 }}>{TEXTS.adminEmailTestSuccess}</div>}
-      {status === "error" && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 8 }}>{TEXTS.adminEmailTestFail}: {errorMsg}</div>}
-    </Card>
-  );
-}
-
-// 관리자가 새 회사를 직접 등록하는 폼. registerCompany()를 호출하는 유일한
-// "관리자 등록" 진입점입니다 — 계약회원/일반회원 업로드는 Design.jsx 쪽에서
-// 이미 registerCompany()를 호출하고 있어서 여기서는 admin_registered 경로만 담당합니다.
-function RegisterForm({ onSubmit }) {
-  const [name, setName] = useState("");
-  const [aliases, setAliases] = useState("");
-  const [logoType, setLogoType] = useState(COMPANY_LOGO_TYPES.CORPORATE);
-  const [industry, setIndustry] = useState("");
-  const [homepage, setHomepage] = useState("");
-  const [officialLogoUrl, setOfficialLogoUrl] = useState("");
-  const [emailDomains, setEmailDomains] = useState("");
-  const [file, setFile] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const canSubmit = name.trim() && file && !submitting;
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      await onSubmit({ name: name.trim(), aliases, logoType, industry, homepage, officialLogoUrl, emailDomains, file });
-      setName(""); setAliases(""); setIndustry(""); setHomepage(""); setOfficialLogoUrl(""); setEmailDomains(""); setFile(null);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Card style={{ marginTop: 10 }}>
-      <Field label={TEXTS.adminFormNameLabel}>
-        <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={TEXTS.adminFormNamePlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormAliasesLabel}>
-        <input style={inputStyle} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={TEXTS.adminFormAliasesPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormLogoTypeLabel}>
-        <select style={inputStyle} value={logoType} onChange={(e) => setLogoType(e.target.value)}>
-          {Object.values(COMPANY_LOGO_TYPES).map((t) => (
-            <option key={t} value={t}>{TEXTS.adminLogoTypeLabel(t)}</option>
-          ))}
-        </select>
-      </Field>
-      <Field label={TEXTS.adminFormIndustryLabel}>
-        <input style={inputStyle} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder={TEXTS.adminFormIndustryPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormHomepageLabel}>
-        <input style={inputStyle} value={homepage} onChange={(e) => setHomepage(e.target.value)} placeholder={TEXTS.adminFormHomepagePlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormOfficialLogoUrlLabel}>
-        <input style={inputStyle} value={officialLogoUrl} onChange={(e) => setOfficialLogoUrl(e.target.value)} placeholder={TEXTS.adminFormOfficialLogoUrlPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormEmailDomainsLabel}>
-        <input style={inputStyle} value={emailDomains} onChange={(e) => setEmailDomains(e.target.value)} placeholder={TEXTS.adminFormEmailDomainsPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormLogoFileLabel}>
-        <UploadBox label={TEXTS.adminFormLogoFileLabel} icon={Upload} done={!!file} fileName={file?.name} onFile={setFile} accept=".png,.jpg,.jpeg,.svg" />
-      </Field>
-      <PrimaryButton disabled={!canSubmit} onClick={handleSubmit}>
-        {submitting ? TEXTS.adminFormSubmitting : TEXTS.adminFormSubmitBtn}
-      </PrimaryButton>
-    </Card>
   );
 }
 
