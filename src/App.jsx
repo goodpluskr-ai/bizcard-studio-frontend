@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Award, Camera, Check, CreditCard, Crown, FileText, Gem, Gift, Globe, Home as HomeIcon, Landmark, Mail, MapPin, Package, PackageSearch, Phone, Printer, Search, Settings, Star, Truck, Upload, User, UserCircle2, Wand2, X, Zap } from "lucide-react";
 
+// ==================== domain/config/serverConfig ====================
+// 2026-08-04: 실제 백엔드 서버(Render)가 배포되면서 추가 — 이 주소 하나가 프론트엔드가
+// 부르는 모든 API 호출의 기준입니다. 서버를 다른 곳으로 옮기거나 도메인을 바꾸게 되면
+// 여기 한 곳만 고치면 됩니다.
+const RENDER_API_BASE = "https://bizcard-studio-server.onrender.com";
+
 // ==================== constants/texts ====================
 const TEXTS = {
   // 홈 화면
@@ -66,7 +72,10 @@ const TEXTS = {
   // 하단 고정 요약바 라벨.
   sampleImagePlaceholder: "샘플 이미지가 여기에 표시돼요",
   productTypeLabel: "상품종류",
-  productTypeHint: "카테고리를 바꾸려면 홈으로 돌아가 다른 카테고리를 선택해주세요.",
+  // 2026-08-16: "카테고리를 바꾸려면 홈으로..." 안내 대신, 빠른명함(cat01)은 제작·
+  // 배송 속도를, 나머지 카테고리는 묶음배송 혜택을 알려주는 문구로 바꿨습니다.
+  productTypeHintQuick: "당일제작·당일발송, 동료와 같이 묶음배송하시면 택배비무료",
+  productTypeHintDefault: "동료와 같이 묶음배송하시면 택배비무료",
   paperDropdownPlaceholder: "용지를 선택해주세요",
   coatingLabel: "코팅",
   coatingDropdownPlaceholder: "코팅을 선택해주세요",
@@ -83,7 +92,6 @@ const TEXTS = {
   // 요청 — "선택 안 함" 항목에 이 앱 공통 문구(추가금 없음) 대신 귀도리 전용 문구를 씀.
   earRoundNoneLabel: "귀도리안함",
   // 2026-08-02: "선택옵션이라는 제목을 진하게 넣어달라"는 요청 반영.
-  paperChoiceLabel: "선택옵션",
   nextOptions: "다음: 옵션선택",
 
   // 옵션 선택 화면
@@ -94,8 +102,6 @@ const TEXTS = {
   noExtraFee: "추가금 없음",
   multiChoiceHintPrefix: "중복 선택 가능 (택1~",
   multiChoiceHintSuffix: ")",
-  setQuantityLabel: (sheets) => sheets ? `세트 수량 (1세트 = ${sheets}매)` : "세트 수량 (1세트 = 최소단위)",
-  setQuantityTotalSheets: (sets, totalSheets) => `총 ${sets}세트 = ${totalSheets.toLocaleString("ko-KR")}매`,
   // 2026-08-11: "세트 수량"이라는 이름이 옵션 수량처럼 헷갈린다는 지적으로, 명함
   // 실물 수량이라는 게 분명하도록 라벨을 바꾸고, 스텝퍼 오른쪽에 실제 매수를
   // 바로 보여주도록 함께 추가.
@@ -112,10 +118,6 @@ const TEXTS = {
   nextSignupLogin: "회원가입 · 로그인",
   // 2026-08-01: "기본값이 단면이라 그냥 지나치는 사람이 많다"는 요청으로 추가 — 디자인
   // 화면으로 넘어가기 직전 한 번 더 확인시킵니다.
-  printSideConfirmTitle: "인쇄 방식을 확인해주세요",
-  printSideConfirmMessage: (label) => `고객님은 단면명함과 양면명함 중에서 ${label}을(를) 선택하셨습니다. 맞으신가요?`,
-  printSideConfirmCancel: "다시 확인할게요",
-  printSideConfirmProceed: "네, 맞아요",
   nextPrefix: "다음: ",
 
   // 회원가입 · 로그인 화면
@@ -139,17 +141,14 @@ const TEXTS = {
   previewSkipVerifyBtn: "⚠️ 미리보기 테스트용: 인증 건너뛰고 계속 (실 배포 시 삭제 필요)",
   verifyCodeLabel: "인증번호",
   verifyCodePlaceholder: "4자리 입력",
-  smsSentNotice: "SMS 발송됨",
   verifiedStamp: "인증 완료",
   companyLabel: "상호",
   companyPlaceholder: "회사명 입력",
   bizDocLabel: "사업자등록증",
-  bizDocUploaded: "업로드 완료 · 승인 대기",
   bizDocUploadPrompt: "사업자등록증 파일 업로드",
   bizDocUploadHint: "사업 등록 여부와 디자이너 확인을 위한 용도예요. 로고나 디자인 저작권과는 관련이 없습니다 — 완성된 디자인의 인쇄만 진행하시니까요.",
   signupSubmitSpecial: "가입 신청 (승인 후 이용)",
   signupSubmitGeneral: "회원가입 완료",
-  loginCodePlaceholder: "문자로 받은 인증번호",
   loginSubmit: "로그인",
   passwordLabel: "비밀번호",
   passwordPlaceholder: "4자리 이상 비밀번호를 만들어주세요",
@@ -170,7 +169,6 @@ const TEXTS = {
 
   // 디자인 화면 (공통)
   designTitle: "디자인",
-  backDesignTitle: "뒷면디자인",
   // 2026-08-02: "디자인 구간 전부 제목이 '디자인'뿐이라 화면 구분이 어렵다"는
   // 피드백 반영 — 각 단계에서 실제로 하는 일이 그대로 제목이 되도록 했습니다.
   subStepTitle: {
@@ -440,16 +438,12 @@ const TEXTS = {
     etc: "기타 문구의 크기와 위치 조절하기",
     logo: "로고의 크기와 위치 조절하기",
   },
-  fineOffsetLabelY: "위로 · 아래로",
-  fineOffsetLabelX: "왼쪽 · 오른쪽",
   sizeStepLabel: "크기조절",
   sizeTierLabel: { sm: "작게", md: "보통", lg: "크게" },
   fontPickerTitle: "서체를 골라보세요",
   fontPickerDefaultLabel: "전체 기본 서체",
   fontPickerKindLabel: { company: "회사명 서체 (선택)", personName: "이름 서체 (선택, 직위도 함께 적용)" },
   fontPickerUseDefault: "기본값 사용",
-  legendBleed: "작업사이즈(도련 포함)",
-  legendTrim: "재단사이즈",
   legendSafeArea: "안전영역",
   cpCheckWarning: (failures) => {
     const labels = { person: "이름", company: "회사명", contact: "연락처" };
@@ -461,7 +455,6 @@ const TEXTS = {
   // 판별하고 있어서 전부 바꾸면 위험), 화면에는 "사진첨가형"으로 보여줍니다.
   templateDisplayLabel: { "사진형": "사진첨가형", "이름크게형": "글자위주(텍스트형)", "회사이름강조형": "업종특성 맞춘 디자인 캐릭터" },
   comingSoonBadge: "준비중",
-  overlapCheckWarning: (pairs) => `⚠ ${pairs.join(", ")}이(가) 너무 가까이 있어서 겹쳐 보일 수 있어요. mm 이동이나 크기 조절로 간격을 띄워보세요.`,
   aiLayoutConfirmBtn: "업종에 맞는 배경 AI로 디자인하기",
   // 2026-08-02: 확정 후 위치·크기를 다시 조정할 수 있는 버튼.
   reopenLayoutBtn: "✏️ 위치·크기 다시 조정하기",
@@ -561,8 +554,6 @@ const TEXTS = {
   paymentMissingDepositor: "입금자명을 먼저 입력해주세요.",
   paymentMissingAgreement: "아래 노란 박스를 눌러서 확인 체크를 해주셔야 접수됩니다.",
   cmykColorNotice: "화면(RGB)과 실제 인쇄색(CMYK)은 미세하게 다를 수 있어요. 인쇄소에서 인쇄용 색상으로 변환하는 과정에서 생기는 자연스러운 차이입니다.",
-  orderFileTooLargeNotice: "지금 올려주신 파일은 용량이 커서 저장이 안 됩니다. 재주문을 쉽게 하기 위해 저장을 원하시면 이메일로 보내주시거나, 그렇지 않다면 저장이 안 되므로 재주문 시에 파일을 다시 접수해주시길 바랍니다.",
-  orderFileSaveFailedNotice: "파일 저장 중 문제가 있었어요. 재주문 시에는 파일을 다시 접수해주시면 됩니다.",
   paymentSubmitBtn: "주문 접수하기 · 입금대기",
 
   // 완료 화면
@@ -592,6 +583,659 @@ const TEXTS = {
   inquiryPrivacyNote: "이 요청 내용은 본인 기기에만 저장돼요. 실제 서비스에서는 관리자가 볼 수 있는 서버로 옮겨야 해요.",
   inquiryDemoAdminReply: "확인했습니다. 반영해서 다시 안내드릴게요. (관리자 미리보기 답변)",
 };
+
+// ==================== domain/content/bannerText ====================
+// ====================================================================
+// Domain : Content
+// Responsibility : 관리자가 자주 바꾸는 홈 화면 배너/마케팅 문구를 코드 수정 없이
+//                   바꿀 수 있게 하는 작은 오버레이 계층.
+//
+// 2026-08-11: "관리자가 텍스트를 바꿀 수 있게 해달라"는 요청 반영. 앱 전체 문구
+// (constants/texts.js의 TEXTS, 수백 개)를 전부 편집 가능하게 만들면 화면마다 다
+// 손대야 해서 범위가 너무 큽니다 — "자주 바뀌는 것만"으로 좁혀서, 홈 화면 상단
+// 배너에 쓰이는 문구 6개만 우선 대상으로 했습니다. 회사 로고와 똑같은 패턴
+// (companyResolver.js의 persistCompany/loadCompanyLibrary 참고)을 그대로 따라
+// RENDER_API_BASE 서버에 저장·조회합니다.
+//
+// 서버 쪽(bizcard-studio-server) routes/bannerText.js에 GET/POST /api/banner-text
+// 엔드포인트를 추가했고 server.js에도 연결해뒀습니다 — Supabase에 banner_text
+// 테이블(key/value)만 만들어주면 바로 동작합니다(테이블 SQL은 routes/bannerText.js
+// 상단 주석 참고).
+// ====================================================================
+
+
+// 편집 가능한 문구 목록 — Admin 화면이 이 목록을 그대로 폼으로 그립니다.
+// key는 constants/texts.js의 TEXTS 키와 반드시 일치해야, 기본값(defaultValue)이 정확합니다.
+const EDITABLE_BANNER_KEYS = [
+  { key: "appTagline", label: "앱 태그라인", defaultValue: TEXTS.appTagline },
+  { key: "homeBannerLabel", label: "배너 상단 라벨", defaultValue: TEXTS.homeBannerLabel },
+  { key: "homeBannerTitle", label: "배너 제목", defaultValue: TEXTS.homeBannerTitle },
+  { key: "homeBannerCta", label: "배너 버튼 문구", defaultValue: TEXTS.homeBannerCta },
+  { key: "homePerkLogoFree", label: "혜택 안내 1", defaultValue: TEXTS.homePerkLogoFree },
+  { key: "homePerkBackgroundFree", label: "혜택 안내 2", defaultValue: TEXTS.homePerkBackgroundFree },
+];
+
+// 앱 시작 시 한 번 호출 — 서버에 저장된 오버라이드를 가져옵니다. 실패하면 빈
+// 객체를 돌려줘서 항상 TEXTS 기본값으로 자연스럽게 폴백되게 합니다.
+async function loadBannerTextOverrides() {
+  try {
+    const res = await fetch(`${RENDER_API_BASE}/api/banner-text`);
+    if (!res.ok) throw new Error(`문구 조회 실패 (${res.status})`);
+    const body = await res.json();
+    return body.overrides || {};
+  } catch (err) {
+    console.error("배너 문구 불러오기 실패:", err);
+    return {};
+  }
+}
+
+// 관리자 화면에서 저장할 때 호출 — { appTagline: "...", homeBannerTitle: "...", ... }
+// 형태의 객체를 그대로 넘기면 됩니다(값이 빈 문자열이면 서버 쪽에서 그 키를 지워
+// 기본값으로 자연스럽게 되돌아가게 처리합니다). 서버가 관리자 토큰을 요구하므로
+// adminToken(Admin 화면 로그인 시 받은 값)을 함께 넘겨야 합니다.
+async function saveBannerTextOverrides(overrides, adminToken) {
+  const res = await fetch(`${RENDER_API_BASE}/api/banner-text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ overrides }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "문구 저장에 실패했습니다.");
+  }
+  return true;
+}
+
+// bannerText(오버라이드 객체)와 키를 넘기면, 오버라이드가 있으면 그 값을, 없으면
+// TEXTS 기본값을 돌려줍니다. Home.jsx에서 TEXTS.appTagline 대신 이걸로 감싸서 씁니다.
+function bannerTextOf(bannerText, key) {
+  const override = bannerText?.[key];
+  return override && override.trim() ? override : TEXTS[key];
+}
+
+// ==================== domain/company/emailVerification ====================
+// ====================================================================
+// Domain : Company / Email Verification
+// Responsibility : 회사 이메일 소유 여부를 실제로 증명하는 절차 (도메인 문자열
+//                  일치만으로는 증명이 안 됨 — 누구나 타이핑만으로 남의 회사
+//                  이메일을 입력할 수 있기 때문에, 그 메일함에 실제로 접근
+//                  권한이 있는지 인증코드로 확인합니다).
+//
+// 아래 세 값은 전부 실제로 확인된 값입니다(2026-07-29): SERVICE_ID는 orderNotification.js
+// 와 같은 계정, TEMPLATE_ID는 "One-Time Password" 템플릿(변수: to_email/verification_code
+// 확인됨), PUBLIC_KEY도 EmailJS 대시보드에서 직접 확인. 이제 자리표시자가 아닙니다.
+// ====================================================================
+const EMAILJS_SERVICE_ID = "service_c48f848";
+const EMAILJS_VERIFY_TEMPLATE_ID = "template_zbv0idi";
+const EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+
+const CODE_LENGTH = 6;
+const CODE_VALID_MS = 5 * 60 * 1000; // 5분
+
+function generateVerificationCode() {
+  const min = 10 ** (CODE_LENGTH - 1);
+  const max = 10 ** CODE_LENGTH - 1;
+  return String(Math.floor(min + Math.random() * (max - min + 1)));
+}
+
+// EmailJS REST API로 직접 POST — SDK를 새로 설치하지 않아도 되도록 fetch만 사용합니다.
+// (getStyleSuggestion이 Anthropic API를 fetch로 직접 호출하는 것과 같은 방식)
+async function sendVerificationEmail(email, code) {
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_VERIFY_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      template_params: { to_email: email, verification_code: code },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`이메일 발송 실패 (${res.status})`);
+  }
+}
+
+// 사용자가 입력한 코드가 실제로 보낸 코드와 일치하고, 유효시간 안인지 확인.
+function checkVerificationCode(inputCode, sentCode, sentAt) {
+  if (!sentCode || !sentAt) return { ok: false, reason: "not_sent" };
+  if (Date.now() - sentAt > CODE_VALID_MS) return { ok: false, reason: "expired" };
+  if (inputCode !== sentCode) return { ok: false, reason: "mismatch" };
+  return { ok: true };
+}
+
+// ==================== domain/company/orderAdmin ====================
+// Order Admin — 관리자가 "입금확인"을 실제로 할 수 있게 해주는 기능.
+// 2026-08-04 갱신: 실제 백엔드 서버(Render + Supabase)가 배포되면서, 이 파일이
+// window.storage(이 미리보기 환경 전용 임시 저장소) 대신 진짜 서버 API를 부르도록
+// 바뀌었습니다. 데이터는 이제 Supabase Postgres에 실제로 저장되고, 여러 사용자
+// 사이의 격리 문제(이전까지의 한계)도 해결됩니다.
+//
+// ⚠️ 아직 안 옮겨진 부분: 인쇄파일(SVG)은 여전히 서버로 전송되지 않습니다 —
+// Supabase Storage 연동은 다음 단계입니다. 지금은 주문 데이터(연락처·금액·설계도 등)만
+// 실제로 저장되고, 인쇄파일 자체는 예전처럼 이메일 첨부로만 전달됩니다.
+//
+// ⚠️ Complete.jsx(고객이 보는 주문완료 화면)는 여전히 이 실제 상태를 안 읽고 예전
+// 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 이 부분은 다음 단계로 남아있습니다.
+
+
+const ORDER_STATUS = {
+  WAITING: "입금대기",
+  CONFIRMED: "입금확인",
+};
+
+// 결제 화면에서 주문 접수 시 호출 — 서버(그리고 그 뒤의 Supabase)에 실제로 저장됩니다.
+// 클라이언트가 미리 만들어둔 orderNo(화면 표시·이메일 등에 이미 쓰이고 있음)를 그대로
+// 서버에 넘겨서, 고객이 보는 주문번호와 데이터베이스에 저장된 주문번호가 항상 같도록
+// 맞췄습니다. 실패해도 결제 자체를 막지 않도록 항상 try/catch(또는 .catch)로 감싸서 쓰세요.
+async function recordNewOrder(orderNo, record) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      orderNo,
+      customerPhone: record.customerPhone,
+      customerName: record.customerName,
+      categoryCode: record.categoryCode,
+      paperCode: record.paperCode,
+      paperChoice: record.paperChoice,
+      options: record.options,
+      sets: record.sets,
+      memberType: record.memberType,
+      amountTotal: record.amountTotal,
+      depositorName: record.depositorName,
+      shipping: record.shipping,
+      designRecipe: record.designRecipe,
+      bundlePhone: record.bundlePhone,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `주문 저장 요청이 실패했습니다 (${res.status}).`);
+  }
+  return res.json();
+}
+
+// 고객의 실제 주문 목록 전체를 가져옵니다("주문내역") — 로그인한 본인 전화번호로만
+// 조회해야 합니다(로그인 게이트는 화면 쪽에서 처리). "재주문" 화면과 "진행상황"
+// 화면 둘 다 이 함수를 씁니다.
+// ⚠️ 지금은 categoryCode/customerName/memberType/orderNo/designRecipe/status/
+// progressStage까지만 서버에 있고, 실제 인쇄파일(printFileSvg)이나 특별회원 업로드
+// 파일은 아직 서버에 저장되지 않습니다(Storage 연동 전) — 그래서 재주문 시 "저장된
+// 파일 그대로"는 아직 안 되고, design_recipe가 있는 경우에 한해 그 설계도로 다시
+// 만드는 것만 가능합니다.
+async function getOrdersByPhone(phone) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders?phone=${encodeURIComponent(phone)}`);
+  if (!res.ok) throw new Error("주문 조회에 실패했습니다.");
+  const body = await res.json();
+  return (body.orders || []).map((o) => ({
+    orderNo: o.order_no,
+    name: o.customer_name,
+    memberType: o.member_type,
+    categoryName: o.category_code,
+    designRecipe: o.design_recipe,
+    status: o.status,
+    progressStage: o.progress_stage ?? 0,
+    expectedPrintDate: o.expected_print_date || null,
+    createdAt: o.created_at,
+    // 아래 두 개는 서버에 아직 없음(known gap).
+    printFileSvg: undefined,
+    specialOrderFile: undefined,
+  }));
+}
+async function adminLogin(password) {
+  const res = await fetch(`${RENDER_API_BASE}/api/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "로그인에 실패했습니다.");
+  return body.token;
+}
+
+// 관리자 화면에서 호출 — 서버(Supabase)에 저장된 전체 주문 목록을 가져옵니다.
+async function listOrders(token) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/all`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("주문 목록을 불러오지 못했습니다.");
+  const body = await res.json();
+  // 프론트엔드 화면 코드가 기대하는 필드 이름(camelCase, orderNo/depositor 등)에
+  // 맞춰서 서버 응답(snake_case)을 변환합니다.
+  return (body.orders || []).map((o) => ({
+    orderNo: o.order_no,
+    depositor: o.depositor_name,
+    categoryName: o.category_code,
+    grandTotal: o.amount_total,
+    status: o.status,
+    confirmedBy: o.confirmed_by,
+    confirmedAt: o.confirmed_at ? new Date(o.confirmed_at).getTime() : null,
+    progressStage: o.progress_stage ?? 0,
+    expectedPrintDate: o.expected_print_date || null,
+    bundlePhone: o.bundle_phone || null,
+    bundleAlone: o.bundle_alone || false,
+  }));
+}
+
+// 관리자가 "입금확인" 버튼을 눌렀을 때 호출 — 실제로 서버가 상태를 바꾸고 기록합니다.
+async function confirmDeposit(orderNo, token) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/${orderNo}/confirm-deposit`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "입금확인 처리에 실패했습니다.");
+  }
+  return res.json();
+}
+
+// 2026-08-07: 결제 이후 "진행상황" 6단계 — 서버(routes/orders.js)와 정확히 같은
+// 순서로 맞춰야 합니다. "디자인완료"는 주문 생성 시 자동으로 참이 되므로(결제
+// 화면까지 온 것 자체가 디자인 확정을 의미), 관리자는 index 1부터만 다음 단계로
+// 넘기면 됩니다.
+const ORDER_PROGRESS_STAGES = ["디자인완료", "인쇄화일변환완료", "인쇄주문접수", "인쇄완료", "택배접수완료", "배송완료"];
+const PRINT_DONE_STAGE_INDEX = 3; // "인쇄완료" — 이 단계로 넘길 때만 예정일을 같이 받음
+
+// 관리자용 — 진행상황을 특정 단계로 넘깁니다. "인쇄완료" 단계로 넘길 땐
+// expectedPrintDate("mm/dd" 형식 문자열)를 같이 넘겨주세요.
+async function advanceProgress(orderNo, stage, token, expectedPrintDate) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/${orderNo}/progress`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ stage, expectedPrintDate }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "진행상황 변경에 실패했습니다.");
+  }
+  return res.json();
+}
+
+// 고객이 주문완료 화면 + "진행상황 조회" 화면에서 호출 — 주문번호로 진행상황을
+// 조회합니다. 로그인 불필요(주문번호 자체를 알아야 조회 가능한 정도의 보호
+// 수준). 진행에 필요한 최소 정보만 옵니다 — 주소·이메일·결제금액 같은 개인정보는
+// 서버가 애초에 안 내려줍니다.
+async function getOrderProgress(orderNo) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/by-number/${encodeURIComponent(orderNo)}`);
+  if (!res.ok) throw new Error("진행상황을 불러오지 못했습니다.");
+  const body = await res.json();
+  return {
+    orderNo: body.order.order_no,
+    categoryName: body.order.category_code,
+    sets: body.order.sets,
+    status: body.order.status,
+    progressStage: body.order.progress_stage ?? 0,
+    expectedPrintDate: body.order.expected_print_date || null,
+  };
+}
+
+// 2026-08-07: "진행상황 조회는 로그인 없이 전화번호로도 가능해야 한다"는 확정된
+// 원칙 반영 — 배송완료(마지막 단계) 안 된 주문만 목록으로 돌려줍니다. 이것도
+// 개인정보(주소·이메일·결제금액)는 응답에 없습니다.
+async function getInFlightOrdersByPhone(phone) {
+  const res = await fetch(`${RENDER_API_BASE}/api/orders/progress-by-phone?phone=${encodeURIComponent(phone)}`);
+  if (!res.ok) throw new Error("진행상황을 불러오지 못했습니다.");
+  const body = await res.json();
+  return (body.orders || []).map((o) => ({
+    orderNo: o.order_no,
+    categoryName: o.category_code,
+    sets: o.sets,
+    status: o.status,
+    progressStage: o.progress_stage ?? 0,
+    expectedPrintDate: o.expected_print_date || null,
+  }));
+}
+
+// ==================== domain/company/companyResolver ====================
+// ====================================================================
+// Domain : Company
+// Version : Phase 1
+// Responsibility : 상호명 문자열 → 회사 식별(별칭 보정 포함) → 회사 정보 반환.
+//                  지금은 이 책임 하나뿐이라 파일도 하나(companyResolver.js)입니다.
+//
+// Company Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   Phase 1 [x] companyResolver.js   — 상호명 → 회사 식별 + 등록 정책(registerCompany, dedup)
+//   Phase 2 [ ] companyAsset.js      — 로고 파일이 실제 Storage(Firebase Storage 등)로 옮겨가면: getLogo(), getBrandColor(), getGuideline()
+//   Phase 3 [ ] companySearch.js     — 등록 회사가 수천~수만 개로 늘어나면: searchCompany(), fuzzySearch()
+//   Phase 4 [ ] companyAlias.js      — "삼성/삼성전자/삼성전자판매/삼성전자서비스"처럼 별칭이 복잡해지면 별도 분리
+//   Phase 5 [ ] companyProfile.js    — companyName/industry/size/preferredFrame·Color·Typography
+//   Phase 6 [ ] companyGuideline.js  — minimumLogoSize/clearSpace/logoPosition/backgroundRule
+//   Phase 7 [ ] companyLearning.js   — "이 회사 사람들이 실제로 어떤 디자인을 많이 선택했는가"
+//                                       (Learning Domain의 STEP 7과 연결. 단, 실명 회사 디자인을
+//                                       복제하는 방향이 아니라 계약된 회사의 공식 가이드 또는 우리
+//                                       서비스 안에서 축적된 실제 선택 데이터 기반으로만 발전시킨다.)
+//
+// 아직 만들지 않은 것 (둘 다 별도 UI/승인 흐름이 필요해 범위가 큼 — registerCompany()라는
+// "창구"만 먼저 만들고, 그 창구를 실제로 호출하는 화면은 다음 단계):
+//   - 계약회원이 디자인 완료 시 "이 로고를 등록할까요?" 묻는 훅
+//   - 사원증·재직증명서 업로드 인증 경로 (관리자 검토 대기열 포함) — emailDomains를
+//     모르는 회사(위 한계 참고)의 재직 확인은 이 경로가 있어야 가능해짐
+// 지금 Phase 2~7을 미리 빈 파일로 만들지 않는 이유: 실제 책임이 없는 상태에서
+// 파일부터 나누면 대부분 빈 껍데기가 되고, 오히려 어디에 뭘 넣을지 헷갈리게 됩니다.
+// ====================================================================
+// Company Resolution Engine (STEP 0 — Design Engine보다 앞단)
+// ----------------------------------------------------------------------
+// 배경: 일반회원이 회사 로고 파일 없이 첫 명함을 만들 때, AI가 "비슷한"
+// 패턴을 대신 만들어주면 실제 회사 로고와 달라 신뢰 문제가 생김
+// (95% 일치는 "틀렸다"고 인식됨 — 100%가 필요). 그래서 로고는 디자인
+// 엔진의 "표현(Expression)" 영역이 아니라 "정확성(Accuracy)" 영역으로
+// 분리해서, Design Engine이 시작되기 전에 여기서 먼저 확보한다.
+//
+// 상표권 주의: 재직 중인 직원 본인이 자기 명함에 소속 회사 로고를
+// 쓰는 것은 정당한 사용이지만, 소속이 아닌 사람이 임의로 쓰면 문제가
+// 될 수 있음. 그래서 라이브러리 매칭 + 회사 이메일 도메인 인증을
+// 통과해야만 공식 로고를 자동 적용한다. (Issue Registry BC-014/BC-018, ADR-007/008)
+// ====================================================================
+// 회사명 비교용 정규화. 공백/기호 제거에 더해, "주식회사"/"(주)"/"㈜"/Inc./Corp. 같은
+// 법인격 표기도 지워서 "삼성전자㈜"와 "삼성전자 주식회사"가 같은 회사로 매칭되게 합니다.
+// 법인격 표기 사전 — 정규식을 계속 늘리는 대신 배열로 관리해서, 새 표기를
+// 발견할 때마다 정규식을 다시 안 짜고 항목만 추가하면 되게 했습니다.
+// 2026-08-04: 실제 서버(Render+Supabase)가 배포되면서, 아래 persistCompany/
+// loadCompanyLibrary/removeCompany가 window.storage 대신 이 서버를 부르도록
+// 바뀌었습니다. resolveCompany·registerCompany의 매칭/중복확인 로직 자체는
+// 전혀 안 바뀌었습니다 — "저장을 어디에 하는가"만 바뀐 것입니다.
+
+const CORPORATE_SUFFIXES = [
+  "주식회사", "(주)", "㈜",
+  "Co., Ltd.", "Co. Ltd.", "Co Ltd", "Co.,Ltd", "Co.",
+  "Corporation", "Corp.", "Corp",
+  "Inc.", "Inc",
+  "Ltd.", "Ltd",
+  "Company",
+];
+
+// 회사명 비교용 정규화. 위 법인격 표기를 전부 지우고(어느 위치에 있든), 공백/기호를
+// 없애서 "삼성전자㈜"와 "삼성전자 주식회사", "Samsung Electronics Co., Ltd."가
+// 전부 같은 회사로 매칭되게 합니다.
+function normalizeCompanyName(str) {
+  let result = str || "";
+  for (const suffix of CORPORATE_SUFFIXES) {
+    result = result.replace(new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+  }
+  return result.replace(/[\s\-_.,()]/g, "").toLowerCase();
+}
+
+// ====================================================================
+// Company Logo Library — 등록 경로는 여러 개, 저장소는 하나.
+// ----------------------------------------------------------------------
+// 등록 경로(source)는 4가지가 있을 수 있습니다:
+//   "official"          — 잘 알려진 대기업, 관리자가 미리 등록 (지금 여기 있는 삼성화재/현대해상)
+//   "contract_upload"   — 계약회원이 디자인하다가 등록한 회사(잘 안 알려진 회사 위주)
+//   "admin_registered"  — 관리자가 직접 추가
+//   "user_uploaded"     — 일반회원이 올린 로고를 관리자 승인 후 라이브러리에 편입
+// 등록 경로와 무관하게, 한 번 라이브러리에 들어오면 resolveCompany()로 똑같이 조회되고,
+// 로고 사용 전 인증도 (verifyCompanyEmail 등으로) 똑같이 거칩니다 — source가 다르다고
+// 검증 없이 통과되는 경로는 없습니다.
+//
+// 등록 정책: "저장목록에 없을 경우에만 저장한다" — registerCompany()가 이 규칙을 강제합니다.
+// 이미 있는 회사(대기업 등)를 계약회원이 또 올려도 중복 저장되지 않습니다.
+//
+// 한계(정직하게): emailDomains를 모르는 회사(계약회원이 올린 소규모 업체 등)는 지금
+// verifyCompanyEmail()로 인증할 방법이 없습니다 — 회사 이메일 도메인을 모르기 때문입니다.
+// 이런 경우의 인증(사원증/재직증명서 업로드 등)은 아직 별도로 구현되지 않았습니다.
+// ====================================================================
+// TODO: 실제 서비스에서는 이 배열이 아니라 진짜 DB(Firestore 등)를 써야 합니다.
+// 지금은 프로토타입이라 모듈 로드 시점의 메모리 배열이라, 새로고침하면 registerCompany()로
+// 추가한 항목은 사라집니다 — 그래도 "등록 정책(dedup 로직)"은 이미 실제로 동작합니다.
+// logoType: 이 로고를 쓰는 조직의 성격. 회사(corporate)뿐 아니라 학교·병원·관공서·
+// 협회·군부대·종교단체도 언젠가 지원할 걸 감안해 처음부터 넣어둡니다.
+const COMPANY_LOGO_TYPES = {
+  CORPORATE: "corporate",
+  GOVERNMENT: "government",
+  SCHOOL: "school",
+  HOSPITAL: "hospital",
+  ASSOCIATION: "association",
+  MILITARY: "military",
+  RELIGION: "religion",
+  ETC: "etc",
+};
+
+const COMPANY_DOMAIN = [
+  {
+    id: "samsung_fire", name: "삼성화재",
+    aliases: ["삼성화재", "삼성화재해상보험", "삼성 화재"],
+    logo: "/logos/insurance/samsung_fire.svg", brandColor: "#0f2b6c", industry: "보험",
+    logoType: COMPANY_LOGO_TYPES.CORPORATE, homepage: "samsungfire.com", officialLogoUrl: null, logoVersion: "1.0", imageHash: null,
+    emailDomains: ["samsungfire.com"],
+    source: "official", status: "official", qualityGrade: "A", lastUpdated: null,
+  },
+  {
+    id: "hyundai_marine", name: "현대해상",
+    aliases: ["현대해상", "현대해상화재보험"],
+    logo: "/logos/insurance/hyundai_marine.svg", brandColor: "#004b93", industry: "보험",
+    logoType: COMPANY_LOGO_TYPES.CORPORATE, homepage: "hi.co.kr", officialLogoUrl: null, logoVersion: "1.0", imageHash: null,
+    emailDomains: ["hi.co.kr"],
+    source: "official", status: "official", qualityGrade: "A", lastUpdated: null,
+  },
+];
+
+// 정확 일치 → alias 정확 일치 → 정규화 후 부분 일치(오타·띄어쓰기 흡수) 순.
+function resolveCompany(inputName) {
+  const trimmed = (inputName || "").trim();
+  if (!trimmed) return null;
+  const n = normalizeCompanyName(trimmed);
+  return (
+    COMPANY_DOMAIN.find((c) => c.name === trimmed) ||
+    COMPANY_DOMAIN.find((c) => c.aliases.some((a) => normalizeCompanyName(a) === n)) ||
+    COMPANY_DOMAIN.find((c) =>
+      c.aliases.some((a) => {
+        const na = normalizeCompanyName(a);
+        return na.includes(n) || n.includes(na);
+      })
+    ) ||
+    null
+  );
+}
+
+// source별 기본 status. "official"/"admin_registered"는 이미 관리자가 확인한 셈이라
+// 바로 신뢰하고, "contract_upload"/"user_uploaded"는 아직 아무도 확인 전이라 검토 대기.
+// naver.com/gmail.com 같은 무료 개인 이메일 도메인은 "특정 회사가 소유한 도메인"이
+// 아니라 누구나 계정을 만들 수 있는 공개 서비스입니다. 이런 도메인을 emailDomains에
+// 등록해두면 "그 메일 서비스에 계정만 있으면 이 회사로 인증된다"는 뜻이 되어버려서,
+// 회사 도메인 검증이라는 목적 자체가 무너집니다(실제로 명함 사진을 보고 발견한 문제 —
+// 도메인 메일이 없는 중소기업·1인기업이 실제로 아주 많습니다). 그래서 이런 도메인은
+// 절대 emailDomains에 등록되지 않도록 여기서 걸러냅니다.
+const FREE_EMAIL_DOMAINS = [
+  "gmail.com", "naver.com", "daum.net", "hanmail.net", "kakao.com",
+  "outlook.com", "hotmail.com", "yahoo.com", "nate.com", "icloud.com", "live.com",
+];
+function isPersonalEmailDomain(domain) {
+  return FREE_EMAIL_DOMAINS.includes((domain || "").toLowerCase().trim());
+}
+
+const DEFAULT_STATUS_BY_SOURCE = {
+  official: "official",
+  admin_registered: "verified",
+  contract_upload: "pending",
+  ai_extracted: "pending",
+  user_uploaded: "pending",
+};
+
+// 로고 품질 등급 — status(신뢰 검증 여부)와는 다른 축입니다. status는 "관리자가
+// 확인했는가", qualityGrade는 "출처를 감안했을 때 이미지 자체의 품질을 얼마나
+// 믿을 수 있는가"입니다. 회사 검색 시 A부터 순서대로 우선 사용합니다.
+//   A: 공식 파일(회사가 직접 제공/관리자 등록) — 항상 우선 사용
+//   B: 홈페이지 등에서 확보한 것으로 추정(계약회원이 전문적으로 확보) — A 없을 때 사용
+//   C: AI가 사진에서 추출 — 임시 사용, 관리자 검토 대상
+//   D: 사용자가 그대로 업로드(추출·가공 없음) — 검증 전까지 개인 명함에만 사용
+const DEFAULT_GRADE_BY_SOURCE = {
+  official: "A",
+  admin_registered: "B",
+  contract_upload: "B",
+  ai_extracted: "C",
+  user_uploaded: "D",
+};
+
+// ====================================================================
+// 영속 저장 — 2026-08-04부터 실제 서버(Render) → Supabase에 저장됩니다.
+// COMPANY_DOMAIN 배열 자체는 여전히 메모리에만 있어서, 앱이 켜질 때마다
+// loadCompanyLibrary()로 서버에서 다시 불러와야 이전에 등록된 회사들이 보입니다.
+// ====================================================================
+async function persistCompany(company) {
+  try {
+    const res = await fetch(`${RENDER_API_BASE}/api/companies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company }),
+    });
+    if (!res.ok) throw new Error(`저장 요청 실패 (${res.status})`);
+  } catch (err) {
+    console.error("회사 라이브러리 저장 실패:", err);
+    // 저장에 실패해도 이번 세션 안에서는 COMPANY_DOMAIN에 이미 들어가 있어 계속 쓸 수 있음
+  }
+}
+
+// 앱 시작 시 한 번 호출 — 서버에 저장된 회사들을 COMPANY_DOMAIN에 합칩니다.
+async function loadCompanyLibrary() {
+  try {
+    const res = await fetch(`${RENDER_API_BASE}/api/companies`);
+    if (!res.ok) throw new Error(`목록 조회 실패 (${res.status})`);
+    const body = await res.json();
+    for (const company of body.companies || []) {
+      if (!company?.id) continue;
+      if (COMPANY_DOMAIN.some((c) => c.id === company.id)) continue; // 이미 있으면 건너뜀(official 시드 데이터 등)
+      COMPANY_DOMAIN.push(company);
+    }
+  } catch (err) {
+    console.error("회사 라이브러리 불러오기 실패:", err);
+  }
+}
+
+// "저장목록에 없을 경우에만 저장한다" 정책을 강제하는 단일 등록 창구.
+// 이미 같은 회사가 있으면(별칭·부분일치 포함) 새로 추가하지 않고 기존 항목을 그대로 반환합니다.
+// entry: { name, aliases?, logo, brandColor?, emailDomains?, source, status? }
+// data URL(base64) 로고 이미지의 SHA-256 해시. 이름이 "삼성전자"/"Samsung Electronics"/
+// "삼성전자(주)"처럼 제각각이어도, 같은 이미지 파일이면 해시가 같아서 같은 로고임을
+// 알 수 있습니다. 경로 문자열(공식 시드 데이터의 /logos/...)은 실제 이미지 바이트가
+// 없어 해시할 수 없으므로 null을 반환합니다.
+async function computeImageHash(logo) {
+  if (!logo || !logo.startsWith("data:")) return null;
+  try {
+    const base64 = logo.split(",")[1];
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null; // 해시 실패해도 등록 자체는 막지 않음 — 이름 기반 중복 체크는 계속 동작
+  }
+}
+
+async function registerCompany(entry) {
+  const existing = resolveCompany(entry.name);
+  if (existing) return { registered: false, company: existing };
+
+  const imageHash = await computeImageHash(entry.logo);
+  if (imageHash) {
+    // 이름은 다르지만 이미지가 완전히 같은 로고가 이미 있으면, 새 항목을 또 만들지 않고
+    // 그 항목에 이번 이름을 별칭으로 추가합니다 (예: "삼성전자"로 이미 등록된 로고를
+    // 다른 사용자가 "Samsung Electronics"로 다시 올린 경우).
+    const sameImage = COMPANY_DOMAIN.find((c) => c.imageHash === imageHash);
+    if (sameImage) {
+      if (!sameImage.aliases.includes(entry.name)) {
+        sameImage.aliases.push(entry.name);
+        await persistCompany(sameImage);
+      }
+      return { registered: false, company: sameImage, mergedAlias: true };
+    }
+  }
+
+  const id = normalizeCompanyName(entry.name) || `company_${COMPANY_DOMAIN.length + 1}`;
+  const safeEmailDomains = (entry.emailDomains || []).filter((d) => {
+    if (isPersonalEmailDomain(d)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[companyResolver] "${d}"는 개인 이메일 도메인이라 ${entry.name}의 emailDomains에 등록하지 않습니다.`);
+      return false;
+    }
+    return true;
+  });
+  const company = {
+    id,
+    name: entry.name,
+    aliases: entry.aliases?.length ? entry.aliases : [entry.name],
+    logo: entry.logo,
+    // brandColor가 이미 "이 로고의 대표 색상"(dominantColor) 역할을 하고 있어서
+    // 별도 필드로 중복 만들지 않았습니다 — 이름만 다를 뿐 같은 개념입니다.
+    brandColor: entry.brandColor || null,
+    industry: entry.industry || null, // industryDetector가 이미 추정한 값이 있으면 넘겨받아 저장 — 다음부터는 재추정 불필요
+    logoType: entry.logoType || COMPANY_LOGO_TYPES.CORPORATE,
+    homepage: entry.homepage || null, // AI가 로고를 "다시 확인하러" 갈 참고용 링크
+    officialLogoUrl: entry.officialLogoUrl || null, // 관리자가 실제로 확인한 로고 원본 위치(재검증용) — homepage와 다른 개념
+    logoVersion: entry.logoVersion || "1.0",
+    imageHash,
+    emailDomains: safeEmailDomains, // 모르면(또는 전부 개인 도메인이라 걸러지면) 빈 배열 — 이 경우 이메일 인증은 통과할 수 없음(위 한계 참고)
+    source: entry.source,
+    status: entry.status || DEFAULT_STATUS_BY_SOURCE[entry.source] || "pending",
+    qualityGrade: entry.qualityGrade || DEFAULT_GRADE_BY_SOURCE[entry.source] || "D",
+    lastUpdated: Date.now(),
+    // vector(로고 벡터화)는 아직 없습니다 — 실제로 인쇄 확대 시 화질 문제가
+    // 확인되면 그때 벡터화 파이프라인을 별도로 추가합니다 (지금은 PNG만 다룸).
+  };
+  COMPANY_DOMAIN.push(company); // 이번 세션에서는 즉시 사용 가능
+  await persistCompany(company); // 다음 세션에서도 쓰려면 저장까지 기다려야 함
+  return { registered: true, company };
+}
+
+// 관리자가 검토를 마쳤을 때 status를 바꾸는 용도 (예: "pending" → "verified"/"rejected").
+// 실제 서비스에서는 관리자 전용 화면·권한 확인이 앞단에 있어야 합니다 — 여기는 상태 변경
+// 자체만 담당합니다.
+// approvedBy/approvedAt: 승인한 사람과 시점만 남깁니다. 처음엔 "어떤 서류로 확인했는지"까지
+// 체크리스트로 받으려고 했었는데, 실제 위험 수준(검색으로 확인한 결과 중소기업 로고 사칭의
+// 실제 사례는 못 찾음, 확인된 것도 전부 도메인 인증이 이미 되는 큰 조직 사칭)에 비해 관리자
+// 승인 과정에 매번 서류 종류를 고르게 하는 건 불필요한 마찰이라고 판단해 뺐습니다 — 승인
+// 여부와 시점만 남아도 "누가 언제 확인했다"는 최소한의 기록으로는 충분합니다.
+async function updateCompanyStatus(companyId, newStatus, approval = null) {
+  const company = COMPANY_DOMAIN.find((c) => c.id === companyId);
+  if (!company) return null;
+  company.status = newStatus;
+  company.lastUpdated = Date.now();
+  if (newStatus === "verified" && approval) {
+    company.approvedBy = approval.approvedBy || "admin";
+    company.approvedAt = Date.now();
+  }
+  if (company.source !== "official") {
+    // 2026-08-04: 승인은 관리자만 할 수 있는 동작이라 서버가 로그인 토큰을 확인합니다 —
+    // Admin.jsx가 로그인 시 받아둔 토큰을 approval.token으로 같이 넘겨줘야 합니다.
+    try {
+      const res = await fetch(`${RENDER_API_BASE}/api/companies/admin/${companyId}/approve`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${approval?.token || ""}` },
+      });
+      if (!res.ok) throw new Error(`승인 요청 실패 (${res.status})`);
+    } catch (err) {
+      console.error("회사 승인 저장 실패:", err);
+    }
+  }
+  return company;
+}
+
+// 관리자가 pending 항목을 반려할 때 사용 — 완전히 삭제합니다(반려된 로고를 다시
+// 못 쓰게 하려면 상태만 바꾸는 것보다 아예 없애는 게 안전합니다 — resolveCompany()가
+// status를 보지 않고 이름만으로 찾기 때문에, 목록에 남아있으면 다시 쓰일 수 있습니다).
+async function removeCompany(companyId, token) {
+  const idx = COMPANY_DOMAIN.findIndex((c) => c.id === companyId);
+  if (idx === -1) return false;
+  COMPANY_DOMAIN.splice(idx, 1);
+  try {
+    const res = await fetch(`${RENDER_API_BASE}/api/companies/admin/${companyId}/reject`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token || ""}` },
+    });
+    if (!res.ok) throw new Error(`반려 요청 실패 (${res.status})`);
+  } catch (err) {
+    console.error("회사 라이브러리 삭제 실패:", err);
+  }
+  return true;
+}
+
+// 회사 이메일 도메인 일치 여부만 확인하는 경량 검증 (서류 대조 아님).
+function verifyCompanyEmail(email, company) {
+  if (!company || !email || !email.includes("@")) return false;
+  const domain = email.split("@")[1]?.toLowerCase().trim();
+  if (!domain || isPersonalEmailDomain(domain)) return false; // 개인 이메일 도메인은 여기서도 한 번 더 막습니다(시드 데이터 실수 대비 이중 방어)
+  return company.emailDomains.includes(domain);
+}
 
 // ==================== components/ui ====================
 const STEPS = ["카테고리", "용지", "옵션", "회원", "디자인", "배송", "결제", "완료"];
@@ -891,500 +1535,798 @@ function UploadBox({ label, icon: Icon, done, fileName, onFile, accept, capture 
   );
 }
 
-// ==================== screens/Shipping ====================
-function ConfirmDialog({ title, message, cancelLabel, confirmLabel, onCancel, onConfirm }) {
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(15,15,30,0.45)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20,
-    }}>
-      <div style={{
-        background: "var(--paper-white)", borderRadius: 16, padding: "22px 20px", maxWidth: 320, width: "100%",
-        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-      }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{title}</div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.6, marginBottom: 18, whiteSpace: "pre-line" }}>{message}</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={onCancel} style={{
-            flex: 1, padding: "11px 0", borderRadius: 10, border: "1.5px solid var(--line)",
-            background: "var(--paper-white)", color: "var(--ink)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-          }}>{cancelLabel}</button>
-          <button onClick={onConfirm} style={{
-            flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
-            background: "var(--stamp)", color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-          }}>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ==================== screens/Admin ====================
+// 아주 가벼운 비밀번호 게이트입니다 — 진짜 권한 시스템(관리자 계정 로그인)이 아닙니다.
+// 실제 서비스에서는 Auth 화면의 관리자 로그인과 연결해야 합니다. 지금은 프로토타입이라
+// 브라우저에 하드코딩된 값과 비교만 합니다 — 이 비밀번호는 보안 장치가 아니라
+// "일반회원이 실수로 들어오는 것"을 막는 정도의 문턱입니다.
+// 2026-08-04: 비밀번호 확인이 이제 서버(Render)에서 이뤄집니다 — 여기 있던 하드코딩된
+// 값은 더 이상 안 쓰입니다. 실제 관리자 비밀번호는 Render 환경변수 ADMIN_PASSWORD에
+// 있습니다.
 
-function Shipping({ order, patch, go, back, freeShip }) {
-  const s = order.ship;
-  const setShip = (p) => patch({ ship: { ...s, ...p } });
-  const canNext = s.name && s.addr && s.phone;
-  const [confirmBack, setConfirmBack] = useState(false);
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.shippingTitle} onBack={() => setConfirmBack(true)} step={5} go={go} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <Field label={TEXTS.shippingNameLabel}><input style={inputStyle} value={s.name} onChange={(e) => setShip({ name: e.target.value })} placeholder={TEXTS.namePlaceholder} /></Field>
-        <Field label={TEXTS.shippingAddrLabel}><input style={inputStyle} value={s.addr} onChange={(e) => setShip({ addr: e.target.value })} placeholder={TEXTS.shippingAddrPlaceholder} /></Field>
-        <Field label={TEXTS.shippingPhoneLabel}><input style={inputStyle} value={s.phone} onChange={(e) => setShip({ phone: e.target.value })} placeholder={TEXTS.phonePlaceholder} /></Field>
+function Admin({ go, back }) {
+  const [authed, setAuthed] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [companies, setCompanies] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  // 2026-08-04: 실제 서버 로그인이 되면서 추가 — 서버가 발급한 서명된 토큰을 여기
+  // 담아둡니다(브라우저를 새로고침하면 사라짐 — 이 미리보기 환경에선 localStorage를
+  // 못 쓰기 때문에 의도적으로 메모리에만 둡니다. 그래서 새로고침하면 재로그인 필요,
+  // 이건 이전(비밀번호만 확인) 방식과 동일한 제약입니다).
+  const [adminToken, setAdminToken] = useState(null);
+  const [loginBusy, setLoginBusy] = useState(false);
+  // 2026-08-02: 이 두 줄은 원래 아래 "if (!authed) return (...)" 다음에 있었습니다 —
+  // 그러면 로그인 전(authed=false)에는 이 useState들이 아예 호출이 안 되고, 로그인
+  // 후(authed=true)에만 호출되어서 같은 컴포넌트인데 렌더마다 훅 호출 개수가
+  // 달라지는 문제(Rules of Hooks 위반)가 있었습니다. 지금까지는 우연히 문제가
+  // 안 드러났을 수 있지만, 원칙대로 모든 훅은 조건 분기보다 위, 맨 앞에서
+  // 무조건 호출되어야 해서 여기로 옮겼습니다.
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [registerResult, setRegisterResult] = useState("");
+  // 2026-08-02: 관리자가 실제로 "입금확인"을 할 수 있는 기능 — 주문 목록 상태.
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [busyOrderNo, setBusyOrderNo] = useState(null);
 
-        <Card style={{ background: "var(--paper-deep)", border: "none" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <Truck size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
-            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
-              <Stamp active={freeShip} tone={freeShip ? "gold" : "stamp"}>{freeShip ? TEXTS.shipFreeApplied : TEXTS.shipFeeApplied}</Stamp>
-            </div>
-          </div>
-        </Card>
-      </div>
-      <div style={{ padding: "8px 18px 18px" }}>
-        <PrimaryButton disabled={!canNext} onClick={() => go("payment")}>{TEXTS.nextPayment}</PrimaryButton>
-        {!canNext && (
-          <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
-            {TEXTS.missingFieldsHint}
-            {[!s.name && TEXTS.shippingNameLabel, !s.addr && TEXTS.shippingAddrLabel, !s.phone && TEXTS.shippingPhoneLabel].filter(Boolean).join(", ")}
-          </div>
-        )}
-      </div>
-
-      {/* 2026-08-16: "디자인이 초기화된다"는 문제 자체를 App.jsx에서 고쳤으므로(더 이상
-          안 사라짐), 초기화 경고는 없앴습니다. 대신 AI 디자인을 다시 쓰면(재생성)
-          추가요금이 붙을 수 있다는 것만 한 번에 안내하는 단일 확인창으로 바꿨습니다. */}
-      {confirmBack && (
-        <ConfirmDialog
-          title={TEXTS.backAiFeeWarnTitle}
-          message={TEXTS.backAiFeeWarnMessage}
-          cancelLabel={TEXTS.backResetCancel}
-          confirmLabel={TEXTS.backResetConfirm}
-          onCancel={() => setConfirmBack(false)}
-          onConfirm={() => { setConfirmBack(false); back(); }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ==================== domain/config/serverConfig ====================
-// 2026-08-04: 실제 백엔드 서버(Render)가 배포되면서 추가 — 이 주소 하나가 프론트엔드가
-// 부르는 모든 API 호출의 기준입니다. 서버를 다른 곳으로 옮기거나 도메인을 바꾸게 되면
-// 여기 한 곳만 고치면 됩니다.
-const RENDER_API_BASE = "https://bizcard-studio-server.onrender.com";
-
-// ==================== domain/company/orderAdmin ====================
-// Order Admin — 관리자가 "입금확인"을 실제로 할 수 있게 해주는 기능.
-// 2026-08-04 갱신: 실제 백엔드 서버(Render + Supabase)가 배포되면서, 이 파일이
-// window.storage(이 미리보기 환경 전용 임시 저장소) 대신 진짜 서버 API를 부르도록
-// 바뀌었습니다. 데이터는 이제 Supabase Postgres에 실제로 저장되고, 여러 사용자
-// 사이의 격리 문제(이전까지의 한계)도 해결됩니다.
-//
-// ⚠️ 아직 안 옮겨진 부분: 인쇄파일(SVG)은 여전히 서버로 전송되지 않습니다 —
-// Supabase Storage 연동은 다음 단계입니다. 지금은 주문 데이터(연락처·금액·설계도 등)만
-// 실제로 저장되고, 인쇄파일 자체는 예전처럼 이메일 첨부로만 전달됩니다.
-//
-// ⚠️ Complete.jsx(고객이 보는 주문완료 화면)는 여전히 이 실제 상태를 안 읽고 예전
-// 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 이 부분은 다음 단계로 남아있습니다.
-
-
-const ORDER_STATUS = {
-  WAITING: "입금대기",
-  CONFIRMED: "입금확인",
-};
-
-// 결제 화면에서 주문 접수 시 호출 — 서버(그리고 그 뒤의 Supabase)에 실제로 저장됩니다.
-// 클라이언트가 미리 만들어둔 orderNo(화면 표시·이메일 등에 이미 쓰이고 있음)를 그대로
-// 서버에 넘겨서, 고객이 보는 주문번호와 데이터베이스에 저장된 주문번호가 항상 같도록
-// 맞췄습니다. 실패해도 결제 자체를 막지 않도록 항상 try/catch(또는 .catch)로 감싸서 쓰세요.
-async function recordNewOrder(orderNo, record) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      orderNo,
-      customerPhone: record.customerPhone,
-      customerName: record.customerName,
-      categoryCode: record.categoryCode,
-      paperCode: record.paperCode,
-      paperChoice: record.paperChoice,
-      options: record.options,
-      sets: record.sets,
-      memberType: record.memberType,
-      amountTotal: record.amountTotal,
-      depositorName: record.depositorName,
-      shipping: record.shipping,
-      designRecipe: record.designRecipe,
-      bundlePhone: record.bundlePhone,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `주문 저장 요청이 실패했습니다 (${res.status}).`);
-  }
-  return res.json();
-}
-
-// 고객의 실제 주문 목록 전체를 가져옵니다("주문내역") — 로그인한 본인 전화번호로만
-// 조회해야 합니다(로그인 게이트는 화면 쪽에서 처리). "재주문" 화면과 "진행상황"
-// 화면 둘 다 이 함수를 씁니다.
-// ⚠️ 지금은 categoryCode/customerName/memberType/orderNo/designRecipe/status/
-// progressStage까지만 서버에 있고, 실제 인쇄파일(printFileSvg)이나 특별회원 업로드
-// 파일은 아직 서버에 저장되지 않습니다(Storage 연동 전) — 그래서 재주문 시 "저장된
-// 파일 그대로"는 아직 안 되고, design_recipe가 있는 경우에 한해 그 설계도로 다시
-// 만드는 것만 가능합니다.
-async function getOrdersByPhone(phone) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders?phone=${encodeURIComponent(phone)}`);
-  if (!res.ok) throw new Error("주문 조회에 실패했습니다.");
-  const body = await res.json();
-  return (body.orders || []).map((o) => ({
-    orderNo: o.order_no,
-    name: o.customer_name,
-    memberType: o.member_type,
-    categoryName: o.category_code,
-    designRecipe: o.design_recipe,
-    status: o.status,
-    progressStage: o.progress_stage ?? 0,
-    expectedPrintDate: o.expected_print_date || null,
-    createdAt: o.created_at,
-    // 아래 두 개는 서버에 아직 없음(known gap).
-    printFileSvg: undefined,
-    specialOrderFile: undefined,
-  }));
-}
-async function adminLogin(password) {
-  const res = await fetch(`${RENDER_API_BASE}/api/admin/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || "로그인에 실패했습니다.");
-  return body.token;
-}
-
-// 관리자 화면에서 호출 — 서버(Supabase)에 저장된 전체 주문 목록을 가져옵니다.
-async function listOrders(token) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/all`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error("주문 목록을 불러오지 못했습니다.");
-  const body = await res.json();
-  // 프론트엔드 화면 코드가 기대하는 필드 이름(camelCase, orderNo/depositor 등)에
-  // 맞춰서 서버 응답(snake_case)을 변환합니다.
-  return (body.orders || []).map((o) => ({
-    orderNo: o.order_no,
-    depositor: o.depositor_name,
-    categoryName: o.category_code,
-    grandTotal: o.amount_total,
-    status: o.status,
-    confirmedBy: o.confirmed_by,
-    confirmedAt: o.confirmed_at ? new Date(o.confirmed_at).getTime() : null,
-    progressStage: o.progress_stage ?? 0,
-    expectedPrintDate: o.expected_print_date || null,
-    bundlePhone: o.bundle_phone || null,
-    bundleAlone: o.bundle_alone || false,
-  }));
-}
-
-// 관리자가 "입금확인" 버튼을 눌렀을 때 호출 — 실제로 서버가 상태를 바꾸고 기록합니다.
-async function confirmDeposit(orderNo, token) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/${orderNo}/confirm-deposit`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "입금확인 처리에 실패했습니다.");
-  }
-  return res.json();
-}
-
-// 2026-08-07: 결제 이후 "진행상황" 6단계 — 서버(routes/orders.js)와 정확히 같은
-// 순서로 맞춰야 합니다. "디자인완료"는 주문 생성 시 자동으로 참이 되므로(결제
-// 화면까지 온 것 자체가 디자인 확정을 의미), 관리자는 index 1부터만 다음 단계로
-// 넘기면 됩니다.
-const ORDER_PROGRESS_STAGES = ["디자인완료", "인쇄화일변환완료", "인쇄주문접수", "인쇄완료", "택배접수완료", "배송완료"];
-const PRINT_DONE_STAGE_INDEX = 3; // "인쇄완료" — 이 단계로 넘길 때만 예정일을 같이 받음
-
-// 관리자용 — 진행상황을 특정 단계로 넘깁니다. "인쇄완료" 단계로 넘길 땐
-// expectedPrintDate("mm/dd" 형식 문자열)를 같이 넘겨주세요.
-async function advanceProgress(orderNo, stage, token, expectedPrintDate) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/admin/${orderNo}/progress`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ stage, expectedPrintDate }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "진행상황 변경에 실패했습니다.");
-  }
-  return res.json();
-}
-
-// 고객이 주문완료 화면 + "진행상황 조회" 화면에서 호출 — 주문번호로 진행상황을
-// 조회합니다. 로그인 불필요(주문번호 자체를 알아야 조회 가능한 정도의 보호
-// 수준). 진행에 필요한 최소 정보만 옵니다 — 주소·이메일·결제금액 같은 개인정보는
-// 서버가 애초에 안 내려줍니다.
-async function getOrderProgress(orderNo) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/by-number/${encodeURIComponent(orderNo)}`);
-  if (!res.ok) throw new Error("진행상황을 불러오지 못했습니다.");
-  const body = await res.json();
-  return {
-    orderNo: body.order.order_no,
-    categoryName: body.order.category_code,
-    sets: body.order.sets,
-    status: body.order.status,
-    progressStage: body.order.progress_stage ?? 0,
-    expectedPrintDate: body.order.expected_print_date || null,
-  };
-}
-
-// 2026-08-07: "진행상황 조회는 로그인 없이 전화번호로도 가능해야 한다"는 확정된
-// 원칙 반영 — 배송완료(마지막 단계) 안 된 주문만 목록으로 돌려줍니다. 이것도
-// 개인정보(주소·이메일·결제금액)는 응답에 없습니다.
-async function getInFlightOrdersByPhone(phone) {
-  const res = await fetch(`${RENDER_API_BASE}/api/orders/progress-by-phone?phone=${encodeURIComponent(phone)}`);
-  if (!res.ok) throw new Error("진행상황을 불러오지 못했습니다.");
-  const body = await res.json();
-  return (body.orders || []).map((o) => ({
-    orderNo: o.order_no,
-    categoryName: o.category_code,
-    sets: o.sets,
-    status: o.status,
-    progressStage: o.progress_stage ?? 0,
-    expectedPrintDate: o.expected_print_date || null,
-  }));
-}
-
-// ==================== utils/format ====================
-const won = (n) => `${Math.round(n).toLocaleString("ko-KR")}원`;
-
-// ==================== screens/Complete ====================
-// 2026-08-07: 서버(ORDER_PROGRESS_STAGES)와 정확히 같은 순서 — 표시용 아이콘만 여기서 따로 붙입니다.
-const STAGE_ICONS = [Check, FileText, Printer, Package, Truck, Check];
-
-function Complete({ order, go, grandTotal, category }) {
-  const orderNo = order.orderNo || "-";
-  // 2026-08-07: "고객이 보는 진행상황이 가짜 로컬 버튼"이었던 것을 실제 서버 조회로
-  // 바꿨습니다 — 관리자가 진행상황을 넘기면 이제 여기 그대로 반영됩니다. 실시간
-  // 자동 갱신은 아니라서(계속 서버를 두드리면 불필요한 트래픽), "새로고침" 버튼으로
-  // 직접 확인하는 방식입니다.
-  const [stage, setStage] = useState(0);
-  const [expectedDate, setExpectedDate] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  const refresh = async () => {
-    if (!order.orderNo) return;
-    setLoading(true);
-    try {
-      const p = await getOrderProgress(order.orderNo);
-      setStage(p.progressStage);
-      setExpectedDate(p.expectedPrintDate);
-    } catch (err) {
-      console.error("진행상황 조회 실패:", err);
-    } finally {
+  useEffect(() => {
+    if (!authed) return;
+    (async () => {
+      await loadCompanyLibrary(); // 이전 세션에 저장된 것들까지 다 불러온 뒤에 목록을 만듭니다.
+      setCompanies([...COMPANY_DOMAIN]);
       setLoading(false);
-      setLoaded(true);
+    })();
+  }, [authed]);
+
+  // 2026-08-11: "관리자가 자주 바뀌는 문구를 바꿀 수 있게 해달라"는 요청 — 홈 화면
+  // 배너 문구 6개만 우선 대상. 서버에 저장된 값이 있으면 그걸로, 없으면 기본 문구로
+  // 폼을 채웁니다.
+  const [bannerTextForm, setBannerTextForm] = useState({});
+  const [bannerTextSaving, setBannerTextSaving] = useState(false);
+  const [bannerTextSaved, setBannerTextSaved] = useState(false);
+  const [bannerTextError, setBannerTextError] = useState("");
+  useEffect(() => {
+    if (!authed) return;
+    (async () => {
+      const overrides = await loadBannerTextOverrides();
+      const form = {};
+      for (const { key, defaultValue } of EDITABLE_BANNER_KEYS) form[key] = overrides[key] || defaultValue;
+      setBannerTextForm(form);
+    })();
+  }, [authed]);
+  const handleSaveBannerText = async () => {
+    setBannerTextSaving(true);
+    setBannerTextError("");
+    setBannerTextSaved(false);
+    try {
+      await saveBannerTextOverrides(bannerTextForm, adminToken);
+      setBannerTextSaved(true);
+    } catch (err) {
+      console.error("배너 문구 저장 실패:", err);
+      setBannerTextError(TEXTS.adminBannerTextSaveError);
+    } finally {
+      setBannerTextSaving(false);
     }
   };
-  React.useEffect(() => { refresh(); }, [order.orderNo]);
+
+  const refreshOrders = async () => {
+    setOrdersLoading(true);
+    try {
+      setOrders(await listOrders(adminToken));
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (!authed) return;
+    refreshOrders();
+  }, [authed]);
+
+  const handleConfirmDeposit = async (orderNo) => {
+    setBusyOrderNo(orderNo);
+    try {
+      await confirmDeposit(orderNo, adminToken);
+      await refreshOrders();
+    } catch (err) {
+      console.error("입금확인 처리 실패:", err);
+    } finally {
+      setBusyOrderNo(null);
+    }
+  };
+
+  // 2026-08-07: 진행상황 6단계 — 주문마다 "인쇄완료" 예정일을 따로 입력받아야 해서,
+  // 주문번호별로 입력값을 따로 기억해둡니다.
+  const [progressDateInputs, setProgressDateInputs] = useState({});
+  const handleAdvanceProgress = async (orderNo, nextStage, expectedPrintDate) => {
+    setBusyOrderNo(orderNo);
+    try {
+      await advanceProgress(orderNo, nextStage, adminToken, expectedPrintDate);
+      await refreshOrders();
+    } catch (err) {
+      console.error("진행상황 변경 실패:", err);
+    } finally {
+      setBusyOrderNo(null);
+    }
+  };
+
+  const refresh = () => setCompanies([...COMPANY_DOMAIN]);
+
+  const handleApprove = async (id) => {
+    setBusyId(id);
+    await updateCompanyStatus(id, "verified", { approvedBy: "admin", token: adminToken });
+    refresh();
+    setBusyId(null);
+  };
+
+  const handleReject = async (id) => {
+    setBusyId(id);
+    await removeCompany(id, adminToken);
+    refresh();
+    setBusyId(null);
+  };
+
+  if (!authed) {
+    return (
+      <div className="app-body">
+        <TopBar title={TEXTS.adminLoginTitle} onBack={back} go={go} />
+        <div style={{ padding: "16px 18px" }}>
+          <input
+            style={inputStyle}
+            type="password"
+            placeholder={TEXTS.adminPasswordPlaceholder}
+            value={passwordInput}
+            onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(""); }}
+          />
+          {passwordError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 8 }}>{passwordError}</div>}
+          <div style={{ marginTop: 14 }}>
+            <PrimaryButton
+              disabled={!passwordInput || loginBusy}
+              onClick={async () => {
+                setLoginBusy(true);
+                setPasswordError("");
+                try {
+                  const token = await adminLogin(passwordInput);
+                  setAdminToken(token);
+                  setAuthed(true);
+                } catch (err) {
+                  setPasswordError(err.message || TEXTS.adminPasswordWrong);
+                } finally {
+                  setLoginBusy(false);
+                }
+              }}
+            >
+              {TEXTS.adminLoginBtn}
+            </PrimaryButton>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const handleRegister = async (formData) => {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(formData.file);
+    });
+    const splitList = (str) => str.split(",").map((s) => s.trim()).filter(Boolean);
+    const result = await registerCompany({
+      name: formData.name,
+      aliases: splitList(formData.aliases),
+      logo: dataUrl,
+      logoType: formData.logoType,
+      industry: formData.industry || null,
+      homepage: formData.homepage || null,
+      officialLogoUrl: formData.officialLogoUrl || null,
+      emailDomains: splitList(formData.emailDomains),
+      source: "admin_registered", // 관리자가 직접 등록 → 기본 status: verified, qualityGrade: B
+    });
+    refresh();
+    if (result.registered) {
+      setRegisterResult(TEXTS.adminRegisterSuccess(result.company.name));
+      setShowRegisterForm(false);
+    } else if (result.mergedAlias) {
+      setRegisterResult(TEXTS.adminRegisterMerged(result.company.name));
+    } else {
+      setRegisterResult(TEXTS.adminRegisterDuplicate(result.company.name));
+    }
+  };
+
+  const pending = companies.filter((c) => c.status === "pending");
+  const others = companies.filter((c) => c.status !== "pending");
 
   return (
     <div className="app-body">
-      <TopBar title={TEXTS.completeTitle} step={7} />
-      <div style={{ padding: "10px 18px 16px" }}>
-        <Card style={{ textAlign: "center", padding: "22px 16px", marginBottom: 14 }}>
-          <div style={{
-            width: 54, height: 54, borderRadius: "50%", background: "var(--stamp)", color: "#fff",
-            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px",
-            transform: "rotate(-6deg)",
-          }}>
-            <Check size={26} />
+      <TopBar title={TEXTS.adminReviewTitle} onBack={back} go={go} />
+      <div style={{ padding: "16px 18px" }}>
+        {/* 2026-08-11: 홈 배너 문구 관리 — 서버(routes/bannerText.js)에 GET/POST
+            /api/banner-text 엔드포인트 연결 완료. Supabase에 banner_text 테이블만
+            만들어주면 저장이 실제로 동작합니다(테이블 없으면 503 에러). */}
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.adminBannerTextSectionTitle}</div>
+        <Card style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {EDITABLE_BANNER_KEYS.map(({ key, label }) => (
+              <Field key={key} label={label}>
+                <input
+                  style={inputStyle}
+                  value={bannerTextForm[key] || ""}
+                  onChange={(e) => { setBannerTextForm({ ...bannerTextForm, [key]: e.target.value }); setBannerTextSaved(false); }}
+                />
+              </Field>
+            ))}
           </div>
-          <div className="serif" style={{ fontSize: 16, fontWeight: 900 }}>{TEXTS.completeHeadline}</div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.orderNoLabel} {orderNo}</div>
-          <div style={{ fontSize: 18, fontWeight: 900, color: "var(--stamp)", marginTop: 10 }}>{won(grandTotal)}</div>
+          {bannerTextError && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 4 }}>{bannerTextError}</div>}
+          {bannerTextSaved && <div style={{ fontSize: 11.5, color: "#22B573", marginTop: 4 }}>{TEXTS.adminBannerTextSaved}</div>}
+          <div style={{ marginTop: 10 }}>
+            <PrimaryButton onClick={handleSaveBannerText} disabled={bannerTextSaving}>
+              {bannerTextSaving ? TEXTS.adminLoading : TEXTS.adminBannerTextSaveBtn}
+            </PrimaryButton>
+          </div>
         </Card>
 
-        {order.fileStorageNotice && (
-          <div style={{
-            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-            borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
-          }}>
-            {order.fileStorageNotice}
-          </div>
+        {/* 2026-08-02 신규: 실제로 입금확인을 처리할 수 있는 주문 관리 섹션.
+            ⚠️ 지금은 Complete.jsx(고객이 보는 화면)가 아직 이 실제 상태를 안 읽고
+            예전 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 테스트 흐름이 막히지
+            않게 하기 위한 의도적 선택입니다. 실 서비스 전환 전 반드시 연결할 것
+            (PROJECT_HANDOFF.md에 기록됨). */}
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
+          {TEXTS.adminOrdersSectionTitle} ({orders.filter((o) => o.status !== ORDER_STATUS.CONFIRMED).length})
+        </div>
+        {ordersLoading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
+        {!ordersLoading && orders.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoOrders}</div>
         )}
-
-        <Card style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 14 }}>{TEXTS.orderStatusTitle}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", position: "relative" }}>
-            <div style={{ position: "absolute", top: 15, left: 20, right: 20, height: 1.5, background: "var(--line)" }} />
-            <div style={{ position: "absolute", top: 15, left: 20, height: 1.5, background: "var(--stamp)", width: `${(stage / (ORDER_PROGRESS_STAGES.length - 1)) * 100}%`, maxWidth: "calc(100% - 40px)" }} />
-            {ORDER_PROGRESS_STAGES.map((label, i) => {
-              const Icon = STAGE_ICONS[i];
-              const active = i <= stage;
-              return (
-                <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1, flex: 1 }}>
-                  <div style={{
-                    width: 30, height: 30, borderRadius: "50%", background: active ? "var(--stamp)" : "var(--paper-white)",
-                    border: `1.5px solid ${active ? "var(--stamp)" : "var(--line)"}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <Icon size={14} color={active ? "#fff" : "var(--ink-soft)"} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {orders.map((o) => {
+            const confirmed = o.status === ORDER_STATUS.CONFIRMED;
+            const stage = o.progressStage ?? 0;
+            const isLastStage = stage >= ORDER_PROGRESS_STAGES.length - 1;
+            const nextStage = stage + 1;
+            const nextIsPrintDone = nextStage === PRINT_DONE_STAGE_INDEX;
+            return (
+              <Card key={o.orderNo}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{o.orderNo}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 3 }}>{TEXTS.adminOrderDepositorLine(o.depositor, o.categoryName)}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.adminOrderAmountLine(o.grandTotal)}</div>
+                    {o.bundlePhone && <div style={{ fontSize: 11.5, color: "var(--stamp)", fontWeight: 700 }}>{TEXTS.adminOrderBundleLine(o.bundlePhone)}</div>}
+                    {o.bundleAlone && <div style={{ fontSize: 11.5, color: "#d64545", fontWeight: 800, marginTop: 2 }}>{TEXTS.adminOrderBundleAloneWarning}</div>}
                   </div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: active ? "var(--ink)" : "var(--ink-soft)", textAlign: "center" }}>
-                    {label}{expectedDate && i === stage && i >= 3 ? ` (${expectedDate})` : ""}
+                  <div style={{
+                    fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, flexShrink: 0,
+                    color: confirmed ? "var(--stamp)" : "#B45309",
+                    background: confirmed ? "rgba(108,76,240,0.1)" : "#FEF3C7",
+                  }}>
+                    {o.status}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-          <button onClick={refresh} disabled={loading} style={{ ...stepperBtn, width: "100%", marginTop: 16, fontSize: 11.5, fontWeight: 700 }}>
-            {loading ? TEXTS.orderStatusRefreshing : TEXTS.orderStatusRefreshBtn}
-          </button>
-        </Card>
+                {!confirmed && (
+                  <button
+                    disabled={busyOrderNo === o.orderNo}
+                    onClick={() => handleConfirmDeposit(o.orderNo)}
+                    style={{
+                      width: "100%", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)",
+                      color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+                    }}
+                  >
+                    <Check size={14} /> {TEXTS.adminConfirmDepositBtn}
+                  </button>
+                )}
+                {confirmed && o.confirmedAt && (
+                  <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6 }}>
+                    {TEXTS.adminApprovalRecord(o.confirmedBy || "admin", o.confirmedAt)}
+                  </div>
+                )}
+                {/* 2026-08-07: 진행상황 6단계 — "디자인완료"는 이미 자동으로 참이라
+                    여기서는 그다음 단계부터 관리자가 하나씩 넘깁니다. 인쇄소·택배사
+                    시스템과 연동이 없어서 자동 감지가 불가능합니다. */}
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+                  <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 6 }}>
+                    {TEXTS.adminProgressLabel}: <b style={{ color: "var(--ink)" }}>{ORDER_PROGRESS_STAGES[stage]}</b>
+                    {o.expectedPrintDate && stage >= PRINT_DONE_STAGE_INDEX ? ` (${o.expectedPrintDate})` : ""}
+                  </div>
+                  {!isLastStage && (
+                    <>
+                      {nextIsPrintDone && (
+                        <input
+                          value={progressDateInputs[o.orderNo] || ""}
+                          onChange={(e) => setProgressDateInputs((prev) => ({ ...prev, [o.orderNo]: e.target.value }))}
+                          placeholder={TEXTS.adminExpectedDatePlaceholder}
+                          style={{ width: "100%", marginBottom: 6, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 12, fontFamily: "inherit" }}
+                        />
+                      )}
+                      <button
+                        disabled={busyOrderNo === o.orderNo}
+                        onClick={() => handleAdvanceProgress(o.orderNo, nextStage, nextIsPrintDone ? progressDateInputs[o.orderNo] : undefined)}
+                        style={{
+                          width: "100%", padding: "8px 0", borderRadius: 10, border: "1.4px solid var(--line)",
+                          background: "var(--paper-white)", color: "var(--ink)", fontWeight: 700, fontSize: 12, cursor: "pointer",
+                        }}
+                      >
+                        {TEXTS.adminNextStageBtn(ORDER_PROGRESS_STAGES[nextStage])}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
 
-        <Card>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{TEXTS.orderDetailsTitle}</div>
-          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
-          <SummaryRow k={TEXTS.orderNoLabel} v={orderNo} />
-        </Card>
+        {/* 이메일 발송 자체(EmailJS 연동)가 되는지 회사 인증 절차 없이 확인하는
+            관리자 전용 도구. 회사메일이 없어도 테스트할 수 있게 해주던 "테스트회사"
+            (gmail.com) 항목은 이제 지웠습니다 — verifyCompanyEmail이 개인 이메일
+            도메인을 아예 거부하도록 막아서 그 방법 자체가 더 안 통합니다. 대신 여기서는
+            회사 인증 로직을 거치지 않고 sendVerificationEmail을 직접 호출하기 때문에,
+            보안 구멍을 만들지 않으면서 "발송이 실제로 되는가"만 확인할 수 있습니다.
+            이미 관리자 비밀번호로 접근이 막혀있는 화면이라 안전합니다. */}
+        <EmailSendTestTool />
+        <BackgroundGenTestTool />
+        <div style={{ marginBottom: 20 }}>
+          <button
+            onClick={() => { setShowRegisterForm((v) => !v); setRegisterResult(""); }}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: showRegisterForm ? "var(--stamp)" : "var(--paper-white)", color: showRegisterForm ? "#fff" : "var(--stamp)", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+          >
+            {showRegisterForm ? TEXTS.adminRegisterCloseBtn : TEXTS.adminRegisterOpenBtn}
+          </button>
+          {showRegisterForm && <RegisterForm onSubmit={handleRegister} />}
+          {registerResult && <div style={{ fontSize: 12, color: "var(--stamp)", marginTop: 8 }}>{registerResult}</div>}
+        </div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
+          {TEXTS.adminPendingSectionTitle} ({pending.length})
+        </div>
+        {loading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
+        {!loading && pending.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoPending}</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {pending.map((c) => (
+            <Card key={c.id}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                {c.logo && (
+                  <img src={c.logo} alt="" style={{ width: 48, height: 48, objectFit: "contain", background: "var(--paper-deep)", borderRadius: 8, flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.name} <span style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 700 }}>{c.qualityGrade}등급</span></div>
+                  <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.adminSourceLabel(c.source)}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  disabled={busyId === c.id}
+                  onClick={() => handleApprove(c.id)}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)", color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+                >
+                  <Check size={14} /> {TEXTS.adminApproveBtn}
+                </button>
+                <button
+                  disabled={busyId === c.id}
+                  onClick={() => handleReject(c.id)}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--line)", background: "var(--paper-white)", color: "#d64545", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+                >
+                  <X size={14} /> {TEXTS.adminRejectBtn}
+                </button>
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        {others.length > 0 && (
+          <>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.adminOthersSectionTitle}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {others.map((c) => (
+                <div key={c.id} style={{ display: "flex", flexDirection: "column", padding: "8px 4px", fontSize: 12, borderBottom: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>{c.name}</span>
+                    <span style={{ color: "var(--ink-soft)" }}>{c.status}</span>
+                  </div>
+                  {c.approvedBy && (
+                    <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 2 }}>
+                      {TEXTS.adminApprovalRecord(c.approvedBy, c.approvedAt)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
-      <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <PrimaryButton onClick={() => go("home")}>{TEXTS.goHomeBtn}</PrimaryButton>
+    </div>
+  );
+}
+
+// 관리자 전용, 회사 인증 로직 없이 EmailJS 발송 자체만 테스트합니다.
+function EmailSendTestTool() {
+  const [testEmail, setTestEmail] = useState("");
+  const [status, setStatus] = useState(null); // null | "sending" | "sent" | "error"
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleTestSend = async () => {
+    setStatus("sending");
+    setErrorMsg("");
+    try {
+      const code = generateVerificationCode();
+      await sendVerificationEmail(testEmail, code);
+      setStatus("sent");
+    } catch (err) {
+      setStatus("error");
+      setErrorMsg(err.message || String(err));
+    }
+  };
+
+  return (
+    <Card style={{ marginBottom: 20, background: "var(--paper-deep)", border: "none" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.adminEmailTestTitle}</div>
+      <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>{TEXTS.adminEmailTestDesc}</div>
+      <input
+        style={inputStyle}
+        type="email"
+        placeholder={TEXTS.adminEmailTestPlaceholder}
+        value={testEmail}
+        onChange={(e) => { setTestEmail(e.target.value); setStatus(null); }}
+      />
+      <div style={{ marginTop: 10 }}>
+        <PrimaryButton disabled={!testEmail || status === "sending"} onClick={handleTestSend}>
+          {status === "sending" ? TEXTS.adminEmailTestSending : TEXTS.adminEmailTestBtn}
+        </PrimaryButton>
+      </div>
+      {status === "sent" && <div style={{ fontSize: 11.5, color: "var(--stamp)", marginTop: 8, fontWeight: 600 }}>{TEXTS.adminEmailTestSuccess}</div>}
+      {status === "error" && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 8 }}>{TEXTS.adminEmailTestFail}: {errorMsg}</div>}
+    </Card>
+  );
+}
+
+// 2026-08-08: AI 배경 생성(Replicate·Flux Schnell) 연결 확인용 — 위 이메일 테스트
+// 도구와 같은 패턴입니다. 실제로 비용이 발생하는 호출이라(장당 약 1~4원), 테스트도
+// 신중하게 — 여기서도 누를 때마다 과금됩니다.
+function BackgroundGenTestTool() {
+  const [prompt, setPrompt] = useState("차분하고 신뢰감 있는 파란색 계열의 추상적인 그라데이션 배경, 명함용");
+  const [status, setStatus] = useState(null); // null | "generating" | "done" | "error"
+  const [errorMsg, setErrorMsg] = useState("");
+  const [imageUrl, setImageUrl] = useState(null);
+
+  const handleTestGenerate = async () => {
+    setStatus("generating");
+    setErrorMsg("");
+    setImageUrl(null);
+    try {
+      const res = await fetch(`${RENDER_API_BASE}/api/generate-background`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, widthMm: 90, heightMm: 50 }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `요청 실패 (${res.status})`);
+      setImageUrl(body.images?.[0] || null);
+      setStatus("done");
+    } catch (err) {
+      setStatus("error");
+      setErrorMsg(err.message || String(err));
+    }
+  };
+
+  return (
+    <Card style={{ marginBottom: 20, background: "var(--paper-deep)", border: "none" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.adminBgTestTitle}</div>
+      <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>{TEXTS.adminBgTestDesc}</div>
+      <textarea
+        style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
+        value={prompt}
+        onChange={(e) => { setPrompt(e.target.value); setStatus(null); }}
+      />
+      <div style={{ marginTop: 10 }}>
+        <PrimaryButton disabled={!prompt || status === "generating"} onClick={handleTestGenerate}>
+          {status === "generating" ? TEXTS.adminBgTestGenerating : TEXTS.adminBgTestBtn}
+        </PrimaryButton>
+      </div>
+      {status === "done" && imageUrl && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 6 }}>{TEXTS.adminBgTestSuccess}</div>
+          <img src={imageUrl} alt="생성된 배경 미리보기" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)" }} />
+        </div>
+      )}
+      {status === "error" && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 8 }}>{TEXTS.adminBgTestFail}: {errorMsg}</div>}
+    </Card>
+  );
+}
+
+// 관리자가 새 회사를 직접 등록하는 폼. registerCompany()를 호출하는 유일한
+// "관리자 등록" 진입점입니다 — 계약회원/일반회원 업로드는 Design.jsx 쪽에서
+// 이미 registerCompany()를 호출하고 있어서 여기서는 admin_registered 경로만 담당합니다.
+function RegisterForm({ onSubmit }) {
+  const [name, setName] = useState("");
+  const [aliases, setAliases] = useState("");
+  const [logoType, setLogoType] = useState(COMPANY_LOGO_TYPES.CORPORATE);
+  const [industry, setIndustry] = useState("");
+  const [homepage, setHomepage] = useState("");
+  const [officialLogoUrl, setOfficialLogoUrl] = useState("");
+  const [emailDomains, setEmailDomains] = useState("");
+  const [file, setFile] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const canSubmit = name.trim() && file && !submitting;
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      await onSubmit({ name: name.trim(), aliases, logoType, industry, homepage, officialLogoUrl, emailDomains, file });
+      setName(""); setAliases(""); setIndustry(""); setHomepage(""); setOfficialLogoUrl(""); setEmailDomains(""); setFile(null);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card style={{ marginTop: 10 }}>
+      <Field label={TEXTS.adminFormNameLabel}>
+        <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={TEXTS.adminFormNamePlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormAliasesLabel}>
+        <input style={inputStyle} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={TEXTS.adminFormAliasesPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormLogoTypeLabel}>
+        <select style={inputStyle} value={logoType} onChange={(e) => setLogoType(e.target.value)}>
+          {Object.values(COMPANY_LOGO_TYPES).map((t) => (
+            <option key={t} value={t}>{TEXTS.adminLogoTypeLabel(t)}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label={TEXTS.adminFormIndustryLabel}>
+        <input style={inputStyle} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder={TEXTS.adminFormIndustryPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormHomepageLabel}>
+        <input style={inputStyle} value={homepage} onChange={(e) => setHomepage(e.target.value)} placeholder={TEXTS.adminFormHomepagePlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormOfficialLogoUrlLabel}>
+        <input style={inputStyle} value={officialLogoUrl} onChange={(e) => setOfficialLogoUrl(e.target.value)} placeholder={TEXTS.adminFormOfficialLogoUrlPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormEmailDomainsLabel}>
+        <input style={inputStyle} value={emailDomains} onChange={(e) => setEmailDomains(e.target.value)} placeholder={TEXTS.adminFormEmailDomainsPlaceholder} />
+      </Field>
+      <Field label={TEXTS.adminFormLogoFileLabel}>
+        <UploadBox label={TEXTS.adminFormLogoFileLabel} icon={Upload} done={!!file} fileName={file?.name} onFile={setFile} accept=".png,.jpg,.jpeg,.svg" />
+      </Field>
+      <PrimaryButton disabled={!canSubmit} onClick={handleSubmit}>
+        {submitting ? TEXTS.adminFormSubmitting : TEXTS.adminFormSubmitBtn}
+      </PrimaryButton>
+    </Card>
+  );
+}
+
+// ==================== data/options ====================
+// choice 항목은 { label, value } 형태입니다. 화면에는 label을 보여주고,
+// 저장·비교(가격 계산 등)에는 value(코드)를 사용해서 나중에 라벨 문구가 바뀌어도 로직이 깨지지 않게 했습니다.
+const OPTIONS = [
+  { code: "OPT001", name: "인쇄 방식", fee: 0, feeLabel: "추가금 없음", required: true, choice: [
+    { label: "단면명함", value: "single" }, { label: "양면명함", value: "double" },
+  ] },
+  { code: "OPT002", name: "귀도리", fee: 2420, feeLabel: "+2,420원", choice: [
+    { label: "네귀도리4mm", value: "4mm" }, { label: "네귀도리6mm", value: "6mm" },
+  ] },
+  { code: "OPT003", name: "타공(3mm)", fee: 3267, feeLabel: "+3,267원", choice: [
+    { label: "좌상", value: "topLeft" }, { label: "좌중", value: "midLeft" }, { label: "좌하", value: "bottomLeft" },
+    { label: "우상", value: "topRight" }, { label: "우중", value: "midRight" }, { label: "우하", value: "bottomRight" },
+  ] },
+  { code: "OPT004", name: "오시(1줄중앙)", fee: 6050, feeLabel: "+6,050원", choice: [
+    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
+  ] },
+  { code: "OPT005", name: "미싱(1줄 위치설정)", fee: 6050, feeLabel: "+6,050원", choice: [
+    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
+  ] },
+  { code: "OPT006", name: "넘버링", fee: 45980, feeLabel: "+45,980원", choice: null },
+];
+
+// 2026-08-09: "타공·오시·미싱·넘버링은 초보자한테 너무 어려운 옵션이라 디자인이
+// 복잡해진다"는 요청 반영 — 일반회원(memberType !== "special")은 인쇄방식·귀도리까지만
+// 고를 수 있고, 나머지 전문가용 옵션은 특별회원(디자이너)에게만 보여줍니다.
+const GENERAL_ALLOWED_OPTIONS = ["OPT001", "OPT002"];
+
+function availableOptions(category, paper, memberType) {
+  if (!category) return [];
+  let opts = OPTIONS;
+  if (category.onlyOptions) opts = opts.filter((o) => category.onlyOptions.includes(o.code));
+  // 2026-08-16: 카드명함(cat04)은 재질 특성상 귀도리 6mm는 안 되고 4mm만 가능 —
+  // 카테고리에 earRoundSizes를 지정해두면 여기서 OPT002 선택지를 그만큼만 남깁니다.
+  if (category.earRoundSizes) {
+    opts = opts.map((o) => (o.code === "OPT002" ? { ...o, choice: o.choice.filter((c) => category.earRoundSizes.includes(c.value)) } : o));
+  }
+  if (category.printSides === false) opts = opts.filter((o) => o.code !== "OPT001");
+  if (category.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
+  if (paper && paper.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
+  // 2026-08-16: 방금 추가한 카드명함 용지들(누드·실버·금펄 계열 등)은 재질 특성상
+  // 귀도리 자체가 안 되는 용지라서 OPT002를 완전히 뺍니다.
+  if (paper && paper.noEarRound) opts = opts.filter((o) => o.code !== "OPT002");
+  // 2026-08-16: 누드·누드플러스·실버(카드명함)처럼 단면인쇄만 가능한 용지는
+  // 인쇄방식 선택지에서 "양면명함"을 아예 뺍니다(고를 수 없게).
+  if (paper && paper.singleSidedOnly) {
+    opts = opts.map((o) => (o.code === "OPT001" ? { ...o, choice: o.choice.filter((c) => c.value !== "double") } : o));
+  }
+  // memberType이 "special"이 아니면(일반회원이거나, 아직 회원유형을 안 고른 상태라면)
+  // 전문가용 옵션(타공·오시·미싱·넘버링)을 목록에서 제외합니다.
+  if (memberType !== "special") opts = opts.filter((o) => GENERAL_ALLOWED_OPTIONS.includes(o.code));
+  return opts;
+}
+
+// 오시(OPT004)·미싱(OPT005)은 세로/가로 방향에 따라 기준가가 달라짐: 기준가 × 1.1 × 1.1
+// 세로 짧게: 5,000원 기준가 → 6,050원 / 가로 길게: 7,000원 기준가 → 8,470원
+// 귀도리(OPT002)는 매수가 많은 용지일수록 비용이 다름 — 대부분(200매 기준) 2,420원인데,
+// 500매인 스노우지250g(pa002)만 3,000원+부가세300원=3,300원으로 확인됨(2026-08-11).
+// 그 외 300매 용지들은 아직 정확한 값을 확인 못 받아서 기본값(2,420원)을 그대로 씁니다 —
+// 실제 원가 확인되면 papers.js에 해당 용지의 earRoundFee를 추가해주세요.
+// 인쇄방식(OPT001)은 대부분 단면/양면 가격이 같아서 추가금이 없지만(2026-08-16 확인),
+// 금펄·은펄 계열처럼 양면 선택 시 추가금이 붙는 용지는 papers.js에 doubleSidePremium을
+// 지정해두면 여기서 자동으로 반영됩니다.
+function optionFee(o, selOptions, paper) {
+  if (o.code === "OPT001") {
+    if (paper?.doubleSidePremium != null && selOptions?.OPT001?.choice === "double") return paper.doubleSidePremium;
+    return 0;
+  }
+  if (o.code === "OPT002" && paper?.earRoundFee != null) return paper.earRoundFee;
+  if (o.code === "OPT004" || o.code === "OPT005") {
+    const value = selOptions?.[o.code]?.choice;
+    const base = value === "horizontal" ? 7000 : 5000;
+    return Math.round(base * 1.1 * 1.1);
+  }
+  return o.fee;
+}
+
+// 용지 선택 시 기본으로 세팅할 옵션값 (인쇄 방식은 필수이므로 단면명함을 기본값으로 지정)
+function defaultSelOptions(category, paper, memberType) {
+  const opts = availableOptions(category, paper, memberType);
+  const hasPrintSide = opts.some((o) => o.code === "OPT001");
+  return hasPrintSide ? { OPT001: { choice: "single" } } : {};
+}
+
+// 옵션 + 선택값을 사람이 읽을 수 있는 문구로 변환 (예: "인쇄 방식(양면명함)", "귀도리(4mm)(좌상/우상)")
+function describeSelectedOption(o, sel) {
+  if (!o) return null;
+  if (!o.choice) return o.name;
+  const raw = sel?.choice;
+  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const labels = values.map((v) => o.choice.find((c) => c.value === v)?.label).filter(Boolean);
+  return labels.length ? `${o.name}(${labels.join("/")})` : o.name;
+}
+
+// ==================== screens/Inquiry ====================
+// 주문별 1:1 문의(수정요청) 스레드 저장.
+// 스타일 캐시와 달리 이건 개인 요청 내용이라 shared:false(본인만 보는 저장소)를 씁니다.
+// 실제 서비스에서는 고객·관리자가 서로 다른 사람이라 이렇게 하면 관리자가 못 보게 되므로,
+// 반드시 진짜 백엔드(고객 계정 ↔ 관리자 계정이 같은 스레드를 보는 구조)로 옮겨야 합니다.
+// 지금은 프로토타입이라 "관리자 답변"도 같은 사용자가 미리보기 버튼으로 흉내냅니다.
+async function loadInquiryThread(orderNo) {
+  try {
+    const res = await window.storage.get(`inquiry:${orderNo}`, false);
+    return res?.value ? JSON.parse(res.value) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveInquiryThread(orderNo, messages) {
+  try {
+    await window.storage.set(`inquiry:${orderNo}`, JSON.stringify(messages), false);
+  } catch {
+    // 저장 실패해도 화면에는 이미 반영돼 있으므로 조용히 무시
+  }
+}
+
+function Inquiry({ order, go, back }) {
+  const orderNo = order.orderNo || "BC24110032"; // 실제 주문이 없을 때(데모 조회)는 예시 주문번호 사용
+  const [messages, setMessages] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = React.useRef(null);
+
+  React.useEffect(() => {
+    let active = true;
+    loadInquiryThread(orderNo).then((msgs) => {
+      if (active) { setMessages(msgs); setLoaded(true); }
+    });
+    return () => { active = false; };
+  }, [orderNo]);
+
+  React.useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const appendMessage = async (sender, content) => {
+    const next = [...messages, { sender, text: content, at: Date.now() }];
+    setMessages(next);
+    await saveInquiryThread(orderNo, next);
+  };
+
+  const handleSend = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setText("");
+    await appendMessage("customer", trimmed);
+    setSending(false);
+  };
+
+  const handlePreviewAdminReply = async () => {
+    await appendMessage("admin", TEXTS.inquiryDemoAdminReply);
+  };
+
+  return (
+    <div className="app-body" style={{ display: "flex", flexDirection: "column" }}>
+      <TopBar title={TEXTS.inquiryTitle} sub={`${TEXTS.inquiryOrderNoPrefix} ${orderNo}`} onBack={back} go={go} />
+
+      <div style={{ padding: "6px 18px 4px" }}>
+        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10 }}>{TEXTS.inquiryPrivacyNote}</div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {loaded && messages.length === 0 && (
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", padding: "24px 10px" }}>{TEXTS.inquiryEmpty}</div>
+        )}
+        {messages.map((m, i) => {
+          const isCustomer = m.sender === "customer";
+          return (
+            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCustomer ? "flex-end" : "flex-start" }}>
+              <div style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 3, padding: "0 4px" }}>
+                {isCustomer ? TEXTS.inquiryCustomerLabel : TEXTS.inquiryAdminLabel}
+              </div>
+              <div style={{
+                maxWidth: "78%", padding: "10px 13px", borderRadius: 14,
+                borderBottomRightRadius: isCustomer ? 4 : 14,
+                borderBottomLeftRadius: isCustomer ? 14 : 4,
+                background: isCustomer ? "var(--stamp)" : "var(--paper-white)",
+                color: isCustomer ? "#fff" : "var(--ink)",
+                border: isCustomer ? "none" : "1.5px solid var(--line)",
+                fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {m.text}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      <div style={{ padding: "12px 18px 6px" }}>
+        <div style={{ fontSize: 10, color: "var(--ink-soft)", textAlign: "center", marginBottom: 6 }}>{TEXTS.inquiryPreviewNote}</div>
         <button
-          onClick={() => go("inquiry")}
+          onClick={handlePreviewAdminReply}
           style={{
-            width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
-            borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit",
+            width: "100%", background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
+            borderRadius: 10, fontSize: 12, fontWeight: 700, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
           }}
         >
-          {TEXTS.inquiryBtn}
+          {TEXTS.inquiryPreviewReplyBtn}
+        </button>
+      </div>
+
+      <div style={{ padding: "0 18px 18px", display: "flex", gap: 8 }}>
+        <input
+          style={{ ...inputStyle, flex: 1 }}
+          placeholder={TEXTS.inquiryPlaceholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={!text.trim() || sending}
+          style={{
+            width: 64, borderRadius: 10, border: "none",
+            background: text.trim() ? "var(--stamp)" : "var(--line)",
+            color: text.trim() ? "#fff" : "var(--ink-soft)",
+            fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", fontFamily: "inherit",
+          }}
+        >
+          {TEXTS.inquirySendBtn}
         </button>
       </div>
     </div>
   );
 }
-
-// ==================== domain/company/orderNotification ====================
-// ====================================================================
-// Domain : Company / Order Notification
-// Responsibility : 새 주문이 들어오면 관리자(goodplus.kr@gmail.com)에게 이메일로
-//                  알려줍니다. emailVerification.js(회사 이메일 소유 확인)와는
-//                  완전히 다른 기능입니다 — 저건 사용자가 입력한 이메일 주소가
-//                  진짜 자기 것인지 확인하는 용도이고, 이건 사장님 본인에게
-//                  "주문이 들어왔다"를 알리는 용도입니다. 서로 다른 EmailJS 템플릿을
-//                  씁니다(변수가 다름: 이쪽은 {{name}}/{{message}}/{{order_id}}).
-//
-// 여기 SERVICE_ID/TEMPLATE_ID는 자리표시자가 아니라, 예전 세션에서 실제로 테스트
-// 발송까지 확인된 값입니다(2026-07-29, service_c48f848 / template_fgijlbe,
-// Gmail 수신 확인됨). 다만 "To Email"은 코드가 아니라 EmailJS 템플릿 자체 설정에
-// 고정되어 있어서(goodplus.kr@gmail.com), 여기서 template_params로 보내지 않습니다.
-// ====================================================================
-const ORDER_EMAILJS_SERVICE_ID = "service_c48f848";
-const EMAILJS_ORDER_TEMPLATE_ID = "template_fgijlbe";
-// PUBLIC_KEY도 emailVerification.js와 같은 EmailJS 계정 값으로 확인됐습니다.
-const ORDER_EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
-
-// order 객체에서 사람이 읽기 좋은 주문 요약 텍스트를 만듭니다. 어떤 필드가 정확히
-// 있는지는 App.jsx의 order 상태 모양을 따릅니다 — 없는 필드는 조용히 건너뜁니다.
-function buildOrderSummary(order, extra = {}) {
-  const lines = [
-    extra.categoryName && `카테고리: ${extra.categoryName}`,
-    extra.paperName && `용지: ${extra.paperName}`,
-    order.sets && `수량: ${order.sets}세트`,
-    extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
-    extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
-    order.depositor && `입금자명: ${order.depositor}`,
-    order.ship?.name && `받는분: ${order.ship.name}`,
-    order.ship?.phone && `연락처: ${order.ship.phone}`,
-    order.ship?.addr && `주소: ${order.ship.addr}`,
-    // 뒷면을 "직접 설명하기"로 고른 경우, 정해진 템플릿 없이 담당자가 직접 만들어야
-    // 하므로 그 설명을 반드시 여기 남깁니다 — 첨부는 앞면 파일 하나만 가는 구조라서
-    // (아래 한계 참고), 참고 이미지를 올렸다면 그 사실도 같이 알려줍니다.
-    order.backCustomNote && `\n[뒷면 직접 요청]\n${order.backCustomTags?.length ? `희망 내용: ${order.backCustomTags.join(", ")}\n` : ""}${order.backCustomNote}`,
-    order.backCustomFile && `(뒷면 참고 이미지 첨부됨 — 파일명: ${order.backCustomFile.name}. 첨부 슬롯은 앞면 파일과 공유라 안 붙었을 수 있어요, 확인 필요)`,
-  ].filter(Boolean);
-  return lines.join("\n");
-}
-
-// 파일을 base64로 바꿉니다 — 이메일 첨부와 window.storage 저장 둘 다 이 형태가 필요해서
-// 이름을 용도 하나에 묶지 않고 범용으로 둡니다.
-function fileToBase64DataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// window.storage는 텍스트 전용, 한 값당 5MB 제한입니다. base64로 바꾸면 원본보다
-// 커지므로(약 1.33배), 원본 기준 이 크기까지만 저장을 "시도"합니다. 저장은 의무가
-// 아니라 재주문 편의를 위한 정책일 뿐이라, 안 되면 강제로 방법을 찾지 않고 그냥
-// "용량이 커서 저장이 안 된다"고 안내하고 넘어갑니다.
-const MAX_STORABLE_FILE_BYTES = 3 * 1024 * 1024;
-
-// ⚠️ 설정 필요: EmailJS에서 첨부파일 발송은 유료 플랜에서만 됩니다(2026-07-30 기준
-// 공식 문서 확인). 그리고 템플릿의 Attachments 탭에 "Variable Attachment" 타입으로
-// 파라미터 이름(예: attachment)을 등록해둬야, 여기서 보내는 값이 실제로 첨부됩니다 —
-// 코드만으로는 안 되고 EmailJS 대시보드에서 템플릿 설정을 한 번 해주셔야 합니다.
-//
-// attachment는 File 객체(특별회원이 올린 파일)이거나, { dataUrl } 형태로 이미 계산된
-// base64(AI가 만든 인쇄용 SVG — 이미 텍스트라 File로 감쌀 필요 없이 바로 씀)일 수 있습니다.
-async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment = null) {
-  const message = buildOrderSummary(order, extra);
-  const templateParams = {
-    name: order.ship?.name || order.depositor || "고객",
-    message,
-    order_id: orderNo,
-  };
-  if (attachment) {
-    try {
-      templateParams.attachment = attachment.dataUrl ? attachment.dataUrl : await fileToBase64DataUrl(attachment);
-    } catch {
-      // 첨부 변환에 실패해도 주문 알림 이메일 자체는 보내야 하므로 무시하고 진행
-    }
-  }
-  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: ORDER_EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_ORDER_TEMPLATE_ID,
-      user_id: ORDER_EMAILJS_PUBLIC_KEY,
-      template_params: templateParams,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`주문 알림 이메일 발송 실패 (${res.status})`);
-  }
-}
-
-// ==================== domain/frame/index ====================
-// Frame Domain — Recommendation이 고른 값을 실제 배치표로 바꿉니다.
-// (Recommendation → Frame → Asset → Kernel(DRS) → 최종 디자인)
-//
-// Frame Domain Roadmap
-//   Phase 1 [x] templates.js / photoTemplates.js / backLayouts.js / frameResolver.js
-//   Phase 2 [x] frameCodes.js — 업종-타입 코드 체계(v1, 신규 설계). "INS-F001" 스펙은
-//     실재를 확인할 수 없어(다른 세션의 Core_Principles.md/Issue_Registry_v1.0.md에도
-//     없음) 그대로 쓰지 않고, 실제 존재하는 업종(INDUSTRY_KEYWORDS)·템플릿(TEMPLATES/
-//     PHOTO_TEMPLATES)만 근거로 새로 설계했습니다. 업종별로 실제 다른 레이아웃을 만드는
-//     기능은 아직 없습니다(전 업종이 같은 TEMPLATE_LAYOUTS를 공유) — frameCode의 업종
-//     부분은 지금은 추천 이유 설명용이고, 실제 레이아웃 분기는 나중에 필요해지면 추가.
-
-// ==================== domain/asset/index ====================
-// Asset Domain — 디자인 엔진의 "재료 창고". AI가 무엇을 고를 수 있는지 정의하는 카탈로그.
-//
-// Asset Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   catalog(지금) — 정적 카탈로그: 사람이 미리 정의해둔 선택지
-//   learning(미래) — STEP 7 Learning이 완성되면 learnedStyles.js/learnedColors.js가 생기고,
-//                    AI는 catalog + learning 둘을 함께 참고하게 됨. 아직 실사용 데이터가
-//                    없어 지금은 만들지 않음 (Company Domain의 companyLearning.js와 동일한 이유).
 
 // ==================== domain/kernel/designRules ====================
 // ── 명함 좌표 시스템 (Card Coordinate System) ──────────────────
@@ -1851,6 +2793,40 @@ function buildLayoutFromPatterns(selections, options = {}) {
   return layout;
 }
 
+// ==================== domain/learning/index ====================
+// Learning Domain — "기록만 남겨두는 배관(plumbing)". STEP 7 전체(통계, 승격/강등
+// 판단, changeReason 수집 UI)는 아직 만들지 않습니다 — 실사용 데이터가 없는 상태에서
+// 만들면 검증 안 된 걸 마치 학습된 것처럼 보여주는 셈이기 때문입니다(예전에 뺀 가짜
+// "★★★★★ 인기순위"와 같은 문제).
+//
+// Learning Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   Phase 1 [x] classifier.js  — Standard/Creative Exception/Invalid Exception 분류
+//   Phase 1 [x] recorder.js    — 기록 저장(KPR 초기 status만 부여, 승격·강등 로직 없음)
+//   Phase 2 [ ] statistics.js  — 업종별 %분포 등 실제 통계 계산 (실사용 데이터 쌓인 뒤)
+//   Phase 3 [ ] memory.js      — standardMemory/creativeExceptionMemory/invalidExceptionMemory
+//                                조회 API (지금은 recorder.js 안에서 저장 키만 씀, 별도 조회 기능 없음)
+
+// ==================== domain/validation/index ====================
+// Validation Domain — Kernel이 "정의"한 규칙을 실제로 "판정"하는 곳.
+// (AI → Recommendation → Frame → Asset → Validation → Renderer)
+//
+// cpValidator / marginValidator / qrValidator는 기존에 Kernel에 있던 판정
+// 로직을 역할에 맞게 옮겨온 것이고, overlapValidator만 이번에 새로 만들었습니다
+// — "실제 책임이 생길 때 분리한다" 원칙대로, 없던 검사를 미리 만들지 않았습니다.
+
+// ==================== domain/frame/index ====================
+// Frame Domain — Recommendation이 고른 값을 실제 배치표로 바꿉니다.
+// (Recommendation → Frame → Asset → Kernel(DRS) → 최종 디자인)
+//
+// Frame Domain Roadmap
+//   Phase 1 [x] templates.js / photoTemplates.js / backLayouts.js / frameResolver.js
+//   Phase 2 [x] frameCodes.js — 업종-타입 코드 체계(v1, 신규 설계). "INS-F001" 스펙은
+//     실재를 확인할 수 없어(다른 세션의 Core_Principles.md/Issue_Registry_v1.0.md에도
+//     없음) 그대로 쓰지 않고, 실제 존재하는 업종(INDUSTRY_KEYWORDS)·템플릿(TEMPLATES/
+//     PHOTO_TEMPLATES)만 근거로 새로 설계했습니다. 업종별로 실제 다른 레이아웃을 만드는
+//     기능은 아직 없습니다(전 업종이 같은 TEMPLATE_LAYOUTS를 공유) — frameCode의 업종
+//     부분은 지금은 추천 이유 설명용이고, 실제 레이아웃 분기는 나중에 필요해지면 추가.
+
 // ==================== domain/frame/photoTemplates ====================
 // ====================================================================
 // Domain : Frame / Photo Templates
@@ -2045,881 +3021,14 @@ function getPhotoLayoutFor(photoVariant) {
   };
 }
 
-// ==================== domain/export/cardFileExporter ====================
-// ====================================================================
-// Domain : Export / Card File Exporter
-// Version : 1.0 (신규 — 가장 중요한 공백을 메우는 파일)
-// Responsibility : 화면에 그려지는 미리보기(CardLayoutPreview)를 실제 인쇄에 쓸 수 있는
-//                  파일로 변환합니다. 지금까지 이 앱은 결제까지는 완벽했지만, "AI가
-//                  디자인한 명함을 실제 파일로 뽑아내는" 마지막 단계가 없었습니다 —
-//                  그게 없으면 인쇄소에 넘길 게 아무것도 없다는 지적이 정확했습니다.
+// ==================== domain/asset/index ====================
+// Asset Domain — 디자인 엔진의 "재료 창고". AI가 무엇을 고를 수 있는지 정의하는 카탈로그.
 //
-// 왜 PNG나 PDF가 아니라 SVG인가:
-//   이 환경(브라우저)에서 실제로 만들 수 있는 도구 중, 별도 라이브러리 설치 없이
-//   벡터(글자가 확대해도 안 깨지는) 파일을 만들 수 있는 유일한 방법이 SVG입니다.
-//   SVG는 width/height를 "mm" 단위로 직접 지정할 수 있어서, 실물 명함 크기(예:
-//   90mm x 50mm)를 그대로 표현하는 진짜 물리적 치수의 파일이 됩니다 — 화면 픽셀을
-//   흉내 낸 이미지가 아니라, 인쇄소가 실제로 열어서 쓸 수 있는 벡터 원고입니다.
-//   대부분의 인쇄소·에디터(일러스트레이터, Inkscape 등)가 SVG를 직접 엽니다.
-//
-// 정직하게 밝히는 한계:
-//   - CMYK 색공간 변환은 안 합니다(SVG는 RGB로 정의됩니다) — 실제 인쇄 시 색상이
-//     미세하게 다르게 나올 수 있고, 이건 결제 화면에 안내 문구로 남겨야 합니다.
-//   - 재단선·눈금(크롭 마크)은 이 버전에 없습니다 — 안전영역·재단선 좌표 자체는
-//     정확하지만, 인쇄소가 요구하는 크롭마크 표시는 필요해지면 추가해야 합니다.
-//   - pt(포인트) 크기는 여기서는 실제 물리 단위(1pt = 0.3527778mm)로 정확히
-//     환산합니다 — 화면 미리보기(CardLayoutPreview)의 pt는 "표시상의 상대 크기"였지만,
-//     이 파일은 실제로 인쇄될 원고라 정확한 환산이 필요하고, 여기서 처음 제대로 합니다.
-// ====================================================================
-
-
-
-
-
-const PT_TO_MM = 0.3527778;
-// 기존 emphasis(lg/md/sm) 기반 레이아웃(예: 사진형이 아직 patternSelections 없이 쓰일 때)은
-// pointSize가 없으므로, kernel/designRules.js의 TEXT_EMPHASIS_SIZE.full 값을 그대로
-// pt로 간주합니다. 2026-08-01: 예전엔 이 파일에 { lg: 13, md: 10, sm: 8.5 }를 따로
-// 하드코딩해 놨었는데, 그러다 보니 미리보기(designRules.js)에서 글자 크기를 키워도
-// 실제 인쇄파일(이 파일)에는 반영이 안 되는 문제가 있었습니다. 이제 designRules.js를
-// 그대로 import해서 쓰므로 두 곳이 항상 같은 값을 씁니다.
-const EMPHASIS_PT_FALLBACK = TEXT_EMPHASIS_SIZE.full;
-
-function escapeXml(str) {
-  return String(str).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
-}
-
-function textFor(key, fields, nameEnglish) {
-  if (key === "company") return fields?.["companyName"] || "회사명";
-  if (key === "position") return fields?.["position"] || "직위";
-  if (key === "personName") {
-    const base = fields?.["personName"] || "성명";
-    return nameEnglish?.trim() ? `${base} (${nameEnglish.trim()})` : base;
-  }
-  if (key === "mobile") return fields?.mobile?.trim() || null;
-  if (key === "telephoneFax") {
-    const tel = fields?.telephone?.trim();
-    const fax = fields?.fax?.trim();
-    if (tel && fax) return `${tel} · Fax ${fax}`;
-    if (tel) return tel;
-    if (fax) return `Fax ${fax}`;
-    return null;
-  }
-  if (key === "address") return fields?.address?.trim() || null;
-  if (key === "email") return fields?.email?.trim() || null;
-  if (key === "website") return fields?.website?.trim() || null;
-  if (key === "etc") return fields?.etc?.trim() || null;
-  return "";
-}
-
-// CardLayoutPreview.jsx와 정확히 같은 규칙(임계값 기반 정렬)을 씁니다 — 미리보기와
-// 실제 파일이 서로 다른 위치로 나오면 "본 것과 다르게 인쇄됐다"는 신뢰 문제가 생기므로,
-// 여기 계산은 renderer/CardLayoutPreview.jsx의 로직과 반드시 같게 유지해야 합니다.
-function alignFor(x) {
-  return x <= DESIGN_RULES.alignment.leftThreshold ? "left" : x >= DESIGN_RULES.alignment.rightThreshold ? "right" : "center";
-}
-function valignFor(y) {
-  return y <= DESIGN_RULES.alignment.leftThreshold ? "top" : y >= DESIGN_RULES.alignment.rightThreshold ? "bottom" : "middle";
-}
-
-function buildCardSVG({
-  templateName, photoVariant, showLogo = true, fields, cardSize, patternSelections = null,
-  fontFamilyId = null, backgroundStyle = "white", logoColor = null, logoDataUrl = null,
-  nameEnglish = "", showContactIcon = true, qrEnabled = false, orientation = null,
-}) {
-  // 2026-08-01: 미리보기와 마찬가지로, 명시적으로 고른 orientation이 있으면 그걸
-  // 그대로 쓰고(가로형/세로형을 직접 고를 수 있게 됐으므로), 없을 때만 예전처럼
-  // 사진 상단형/하단형 여부로 자동 추정합니다.
-  const spec = getCardSpec(cardSize, orientation || (isPortraitPhotoVariant(templateName, photoVariant) ? "portrait" : "landscape"));
-  const workingW = spec.trimWidth + spec.bleed * 2;
-  const workingH = spec.trimHeight + spec.bleed * 2;
-  const safeWidthMm = spec.trimWidth - spec.safeMargin * 2;
-  const safeHeightMm = spec.trimHeight - spec.safeMargin * 2;
-  const safeOriginXMm = spec.bleed + spec.safeMargin;
-  const safeOriginYMm = spec.bleed + spec.safeMargin;
-
-  const photoRect = templateName === "사진형" ? (PHOTO_RECT_BY_VARIANT[photoVariant] || PHOTO_RECT_BY_VARIANT[PHOTO_TEMPLATES[0]]) : {};
-  const layout = patternSelections
-    ? { ...photoRect, ...buildLayoutFromPatterns(patternSelections, { overlay: templateName === "사진형" && !!PHOTO_TEMPLATE_PATTERN_SELECTIONS[photoVariant]?.overlay }) }
-    : getLayoutFor(templateName, photoVariant);
-
-  const bgOption = BACKGROUND_STYLE_OPTIONS.find((b) => b.id === backgroundStyle);
-  const needsLightText = bgOption?.dark === true;
-  const fontForKind = (kind) => {
-    const id = typeof fontFamilyId === "string" ? fontFamilyId : (fontFamilyId?.[kind] || fontFamilyId?.default);
-    return resolveFontFamily(id);
-  };
-  const CONTACT_SUB_KINDS = ["mobile", "telephoneFax", "address", "email", "website", "etc"];
-  const anyContactFilled = CONTACT_SUB_KINDS.some((k) => layout[k] && textFor(k, fields, nameEnglish));
-
-  const parts = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${workingW}mm" height="${workingH}mm" viewBox="0 0 ${workingW} ${workingH}">`);
-  // 배경(도련 전체 — 실제 인쇄에서는 도련까지 배경색이 깔려야 흰 테두리가 안 남습니다)
-  const bgFill = bgOption?.id === "gradient" ? "url(#bgGradient)" : (bgOption?.id === "soft" ? "#F4F1FB" : "#FFFFFF");
-  if (bgOption?.id === "gradient") {
-    parts.push(`<defs><linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6C4CF0"/><stop offset="100%" stop-color="#4C6FFF"/></linearGradient></defs>`);
-  }
-  parts.push(`<rect x="0" y="0" width="${workingW}" height="${workingH}" fill="${bgFill}"/>`);
-
-  // 2026-08-02: "안전영역 재정의" 반영 — 텍스트·로고는 안전영역(safeMargin) 안에
-  // 머물러야 하지만(기존 그대로, resolveElementPosition의 clampToAllowedRegion이
-  // 담당), 배경색·그림(사진)처럼 "디자인의 배경이 되는 요소"는 재단선(trim)이 아니라
-  // 도련까지 포함한 작업선까지 꽉 채워야 합니다 — 재단 시 아주 약간의 오차가 있어도
-  // 흰 테두리가 남지 않게 하기 위해서입니다. 배경색은 이미 도련 전체를 채우고
-  // 있었는데(위 rect), 사진(photo) rect는 trim 기준으로만 계산되어 있어서 카드
-  // 가장자리에 닿는 사진(사진 배경형·상단형·하단형·분할형·우측형)에서 도련만큼
-  // 얇게 흰 여백이 남는 진짜 버그가 있었습니다. 아래에서, 사진 영역이 원래 카드의
-  // 어느 가장자리(0% 또는 100%)에 닿아있었는지 보고, 닿아있던 쪽으로만 도련만큼
-  // 밀어서 확장합니다(중앙에 떠 있는 프로필 원형 같은 사진은 어느 쪽도 안 닿아있으니
-  // 그대로 둡니다).
-  if (layout.photo) {
-    // 2026-08-02: "사진형도 위치·크기를 옮길 수 있게 해달라"는 요청 반영 — 미리보기와
-    // 똑같은 함수(computeEffectivePhotoRect)로 사용자가 옮긴 만큼을 먼저 반영한
-    // "실제" rect를 구하고, 도련 확장 여부(아래)는 원래 정의가 아니라 이 조정된
-    // rect가 지금 가장자리에 닿아있는지를 기준으로 다시 판단합니다 — 그래야 사진을
-    // 조금 옮긴 뒤에도 도련 처리가 계속 정확합니다.
-    const photoOffsetMm = patternSelections?.photoFineOffsetMm || { x: 0, y: 0 };
-    const photoScale = patternSelections?.photoScale || 1;
-    const rect = computeEffectivePhotoRect(layout.photo.rect, photoOffsetMm, photoScale, spec.trimWidth, spec.trimHeight);
-    let px = spec.bleed + (rect.left / 100) * spec.trimWidth;
-    let py = spec.bleed + (rect.top / 100) * spec.trimHeight;
-    let pw = (rect.width / 100) * spec.trimWidth;
-    let ph = (rect.height / 100) * spec.trimHeight;
-    const EDGE_EPS = 0.01; // % 단위 반올림 오차 허용
-    if (rect.left <= EDGE_EPS) { px -= spec.bleed; pw += spec.bleed; }
-    if (rect.left + rect.width >= 100 - EDGE_EPS) { pw += spec.bleed; }
-    if (rect.top <= EDGE_EPS) { py -= spec.bleed; ph += spec.bleed; }
-    if (rect.top + rect.height >= 100 - EDGE_EPS) { ph += spec.bleed; }
-    if (layout.photo.shape === "circle") {
-      parts.push(`<clipPath id="photoClip"><ellipse cx="${px + pw / 2}" cy="${py + ph / 2}" rx="${pw / 2}" ry="${ph / 2}"/></clipPath>`);
-    }
-    parts.push(`<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#E9E7F5" ${layout.photo.shape === "circle" ? 'clip-path="url(#photoClip)"' : ""}/>`);
-    // 실제 고객 사진 파일은 이 자리에 <image>로 들어가야 하지만, 여기서는 사진 자체를
-    // 다루지 않습니다(사진형 주문은 아직 사진 업로드가 이 파이프라인과 안 이어져 있음 —
-    // 별도로 확인이 필요합니다).
-  }
-
-  // 각 요소(로고/회사명/이름·직위/연락처 세부항목)
-  for (const [key, pos] of Object.entries(layout)) {
-    if (pos.kind === "photo") continue;
-    if (pos.kind === "logo" && !showLogo) continue;
-    const text = textFor(key, fields, nameEnglish);
-    const isMobileFallback = key === "mobile" && text === null && !anyContactFilled;
-    if (text === null && !isMobileFallback) continue;
-    const displayText = isMobileFallback ? "010-0000-0000" : text;
-
-    const { x, y } = resolveElementPosition(pos.kind, pos, spec);
-    const xMm = safeOriginXMm + (x / 100) * safeWidthMm;
-    const yMm = safeOriginYMm + (y / 100) * safeHeightMm;
-    const align = alignFor(x);
-    const valign = valignFor(y);
-    const isLogo = pos.kind === "logo";
-
-    if (isLogo) {
-      // LOGO_SIZE_PERCENT의 full 모드 값(%, 안전영역 너비 기준)을 그대로 mm로 환산
-      const sizePercent = LOGO_SIZE_PERCENT.full[pos.size || "md"];
-      const sizeMm = (sizePercent / 100) * safeWidthMm;
-      const boxX = align === "left" ? xMm : align === "right" ? xMm - sizeMm : xMm - sizeMm / 2;
-      const boxY = valign === "top" ? yMm : valign === "bottom" ? yMm - sizeMm : yMm - sizeMm / 2;
-      if (logoDataUrl) {
-        parts.push(`<image x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
-      } else {
-        parts.push(`<rect x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" fill="${resolveLogoColor(logoColor)}" stroke="rgba(0,0,0,0.18)" stroke-width="0.2"/>`);
-      }
-      continue;
-    }
-
-    const pointSizePt = pos.pointSize != null ? pos.pointSize : EMPHASIS_PT_FALLBACK[pos.emphasis || "md"];
-    const fontSizeMm = pointSizePt * PT_TO_MM;
-    const fontDef = fontForKind(key);
-    const fill = (pos.overlay || needsLightText) ? "#FFFFFF" : "#1A1A22";
-    const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
-    // SVG의 dominant-baseline만으로 valign(top/middle/bottom)을 정확히 맞추기 어려워서,
-    // y좌표 자체를 폰트 크기 기준으로 보정합니다 — 화면(CSS translate)과 같은 결과를 냅니다.
-    const yAdjusted = valign === "top" ? yMm + fontSizeMm * 0.8 : valign === "bottom" ? yMm - fontSizeMm * 0.2 : yMm + fontSizeMm * 0.3;
-    parts.push(
-      `<text x="${xMm}" y="${yAdjusted}" font-size="${fontSizeMm}" font-family="${escapeXml(fontDef.family.replace(/'/g, ""))}" font-weight="${fontDef.weight}" fill="${fill}" text-anchor="${anchor}">${escapeXml(displayText)}</text>`
-    );
-  }
-
-  parts.push(`</svg>`);
-  return parts.join("\n");
-}
-
-function svgToDataUrl(svgString) {
-  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgString)))}`;
-}
-
-// 뒷면 패널 하나만 그립니다 — BACK_LAYOUTS(domain/frame/backLayouts.js)의 logo/qr/blank/
-// text 중 하나("custom"은 사람이 직접 디자인하므로 여기서 다루지 않습니다).
-// 2026-08-01: "text"(문구형) 추가 — 여러 줄 문구를 정렬(왼쪽/가운데/오른쪽)·서체
-// 선택해서 넣을 수 있습니다. backContent = { lines: string[], align: "left"|"center"|"right", fontFamilyId }.
-function buildBackPanelSVG(choice, spec, offsetX, logoDataUrl, logoColor, backContent = null) {
-  const workingW = spec.trimWidth + spec.bleed * 2;
-  const workingH = spec.trimHeight + spec.bleed * 2;
-  const cx = offsetX + workingW / 2;
-  const cy = workingH / 2;
-  const parts = [`<rect x="${offsetX}" y="0" width="${workingW}" height="${workingH}" fill="#FFFFFF"/>`];
-  if (choice === "logo") {
-    const size = Math.min(workingW, workingH) * 0.35;
-    if (logoDataUrl) {
-      parts.push(`<image x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
-    } else {
-      parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="${resolveLogoColor(logoColor)}"/>`);
-    }
-  } else if (choice === "qr") {
-    const size = Math.min(workingW, workingH) * 0.4;
-    parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="#1A1A22"/>`);
-    parts.push(`<text x="${cx}" y="${cy}" font-size="4" fill="#fff" text-anchor="middle" dominant-baseline="middle">QR</text>`);
-  } else if (choice === "text" && backContent) {
-    const lines = (backContent.lines || []).filter((l) => l.trim());
-    const fontDef = resolveFontFamily(backContent.fontFamilyId);
-    const align = backContent.align || "left";
-    const marginMm = spec.safeMargin + spec.bleed;
-    const textAnchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
-    const xPos = align === "left" ? offsetX + marginMm : align === "right" ? offsetX + workingW - marginMm : cx;
-    // 폰트 크기는 줄 수에 따라 살짝 줄여서(너무 많이 넣으면 겹치는 대신 작아지게)
-    // 최소한의 안전장치를 둡니다 — 앞면처럼 정교한 겹침 방지는 아니지만, 아예 안전선을
-    // 벗어나 잘리는 것보다는 낫습니다.
-    const fontSize = lines.length <= 3 ? 5.5 : lines.length <= 6 ? 4.2 : 3.4;
-    const lineHeight = fontSize * 1.5;
-    const totalHeight = lines.length * lineHeight;
-    const startY = cy - totalHeight / 2 + fontSize;
-    lines.forEach((line, i) => {
-      const y = startY + i * lineHeight;
-      const safeLine = String(line).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      parts.push(`<text x="${xPos}" y="${y}" font-size="${fontSize}" font-family="${fontDef.family}" font-weight="${fontDef.weight}" fill="#1A1A22" text-anchor="${textAnchor}">${safeLine}</text>`);
-    });
-  }
-  // "blank"은 배경만 있는 빈 뒷면입니다.
-  return parts.join("\n");
-}
-
-// 앞면 SVG 문자열(buildCardSVG의 결과)과 뒷면 선택지를 받아, 인쇄소가 한 파일에서
-// 양면을 바로 알아볼 수 있도록 나란히 배치한 하나의 SVG로 합칩니다. 각 패널 위에
-// "앞면"/"뒷면" 표시는 실제 인쇄 영역(도련) 바깥의 여유 공간에만 넣어서, 인쇄되는
-// 카드 내용 자체에는 전혀 영향이 없습니다.
-// 2026-08-01: "가로형/세로형을 앞뒤 독립적으로 고를 수 있어야 한다"는 요청으로
-// frontSpec/backSpec을 따로 받습니다(카드 바깥 모양은 물리적으로 앞뒤가 같아야
-// 하지만 — 한 장의 카드니까 — 그 안 내용 배치는 완전히 독립적입니다. 앞뒤를 다른
-// 모양으로 고르면 그 상태 그대로 반영됩니다. 자동으로 서로 맞춰 돌리는 기능은
-// "흔치 않은 경우라 필요 없다"고 확인받아 만들지 않았습니다). 높이가 서로 다르면
-// 짧은 쪽을 세로 가운데로 맞춰서 나란히 놓습니다.
-function buildDoubleSidedSVG(frontSvgInner, backLayoutChoice, frontSpec, logoDataUrl, logoColor, backContent = null, backSpec = frontSpec) {
-  const frontW = frontSpec.trimWidth + frontSpec.bleed * 2;
-  const frontH = frontSpec.trimHeight + frontSpec.bleed * 2;
-  const backW = backSpec.trimWidth + backSpec.bleed * 2;
-  const backH = backSpec.trimHeight + backSpec.bleed * 2;
-  const gap = 10; // mm, 앞/뒤 사이 여백
-  const labelHeight = 6; // mm, 라벨용 여유
-  const totalW = frontW + gap + backW;
-  const maxPanelH = Math.max(frontH, backH);
-  const totalH = maxPanelH + labelHeight;
-  const frontOffsetY = (maxPanelH - frontH) / 2;
-  const backOffsetY = (maxPanelH - backH) / 2;
-  const backOffsetX = frontW + gap;
-  const frontInnerMatch = frontSvgInner.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
-  const frontInner = frontInnerMatch ? frontInnerMatch[1] : frontSvgInner;
-
-  const parts = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}mm" height="${totalH}mm" viewBox="0 0 ${totalW} ${totalH}">`);
-  parts.push(`<text x="0" y="4" font-size="3" fill="#999">앞면 (Front)</text>`);
-  parts.push(`<text x="${backOffsetX}" y="4" font-size="3" fill="#999">뒷면 (Back)</text>`);
-  parts.push(`<g transform="translate(0, ${labelHeight + frontOffsetY})">${frontInner}</g>`);
-  parts.push(`<g transform="translate(0, ${labelHeight + backOffsetY})">${buildBackPanelSVG(backLayoutChoice, backSpec, backOffsetX, logoDataUrl, logoColor, backContent)}</g>`);
-  parts.push(`</svg>`);
-  return parts.join("\n");
-}
-
-// ==================== data/options ====================
-// choice 항목은 { label, value } 형태입니다. 화면에는 label을 보여주고,
-// 저장·비교(가격 계산 등)에는 value(코드)를 사용해서 나중에 라벨 문구가 바뀌어도 로직이 깨지지 않게 했습니다.
-const OPTIONS = [
-  { code: "OPT001", name: "인쇄 방식", fee: 0, feeLabel: "추가금 없음", required: true, choice: [
-    { label: "단면명함", value: "single" }, { label: "양면명함", value: "double" },
-  ] },
-  { code: "OPT002", name: "귀도리", fee: 2420, feeLabel: "+2,420원", choice: [
-    { label: "네귀도리4mm", value: "4mm" }, { label: "네귀도리6mm", value: "6mm" },
-  ] },
-  { code: "OPT003", name: "타공(3mm)", fee: 3267, feeLabel: "+3,267원", choice: [
-    { label: "좌상", value: "topLeft" }, { label: "좌중", value: "midLeft" }, { label: "좌하", value: "bottomLeft" },
-    { label: "우상", value: "topRight" }, { label: "우중", value: "midRight" }, { label: "우하", value: "bottomRight" },
-  ] },
-  { code: "OPT004", name: "오시(1줄중앙)", fee: 6050, feeLabel: "+6,050원", choice: [
-    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
-  ] },
-  { code: "OPT005", name: "미싱(1줄 위치설정)", fee: 6050, feeLabel: "+6,050원", choice: [
-    { label: "세로 짧게", value: "vertical" }, { label: "가로 길게", value: "horizontal" },
-  ] },
-  { code: "OPT006", name: "넘버링", fee: 45980, feeLabel: "+45,980원", choice: null },
-];
-
-// 2026-08-09: "타공·오시·미싱·넘버링은 초보자한테 너무 어려운 옵션이라 디자인이
-// 복잡해진다"는 요청 반영 — 일반회원(memberType !== "special")은 인쇄방식·귀도리까지만
-// 고를 수 있고, 나머지 전문가용 옵션은 특별회원(디자이너)에게만 보여줍니다.
-const GENERAL_ALLOWED_OPTIONS = ["OPT001", "OPT002"];
-
-function availableOptions(category, paper, memberType) {
-  if (!category) return [];
-  let opts = OPTIONS;
-  if (category.onlyOptions) opts = opts.filter((o) => category.onlyOptions.includes(o.code));
-  // 2026-08-16: 카드명함(cat04)은 재질 특성상 귀도리 6mm는 안 되고 4mm만 가능 —
-  // 카테고리에 earRoundSizes를 지정해두면 여기서 OPT002 선택지를 그만큼만 남깁니다.
-  if (category.earRoundSizes) {
-    opts = opts.map((o) => (o.code === "OPT002" ? { ...o, choice: o.choice.filter((c) => category.earRoundSizes.includes(c.value)) } : o));
-  }
-  if (category.printSides === false) opts = opts.filter((o) => o.code !== "OPT001");
-  if (category.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
-  if (paper && paper.numbering === false) opts = opts.filter((o) => o.code !== "OPT006");
-  // 2026-08-16: 방금 추가한 카드명함 용지들(누드·실버·금펄 계열 등)은 재질 특성상
-  // 귀도리 자체가 안 되는 용지라서 OPT002를 완전히 뺍니다.
-  if (paper && paper.noEarRound) opts = opts.filter((o) => o.code !== "OPT002");
-  // 2026-08-16: 누드·누드플러스·실버(카드명함)처럼 단면인쇄만 가능한 용지는
-  // 인쇄방식 선택지에서 "양면명함"을 아예 뺍니다(고를 수 없게).
-  if (paper && paper.singleSidedOnly) {
-    opts = opts.map((o) => (o.code === "OPT001" ? { ...o, choice: o.choice.filter((c) => c.value !== "double") } : o));
-  }
-  // memberType이 "special"이 아니면(일반회원이거나, 아직 회원유형을 안 고른 상태라면)
-  // 전문가용 옵션(타공·오시·미싱·넘버링)을 목록에서 제외합니다.
-  if (memberType !== "special") opts = opts.filter((o) => GENERAL_ALLOWED_OPTIONS.includes(o.code));
-  return opts;
-}
-
-// 오시(OPT004)·미싱(OPT005)은 세로/가로 방향에 따라 기준가가 달라짐: 기준가 × 1.1 × 1.1
-// 세로 짧게: 5,000원 기준가 → 6,050원 / 가로 길게: 7,000원 기준가 → 8,470원
-// 귀도리(OPT002)는 매수가 많은 용지일수록 비용이 다름 — 대부분(200매 기준) 2,420원인데,
-// 500매인 스노우지250g(pa002)만 3,000원+부가세300원=3,300원으로 확인됨(2026-08-11).
-// 그 외 300매 용지들은 아직 정확한 값을 확인 못 받아서 기본값(2,420원)을 그대로 씁니다 —
-// 실제 원가 확인되면 papers.js에 해당 용지의 earRoundFee를 추가해주세요.
-// 인쇄방식(OPT001)은 대부분 단면/양면 가격이 같아서 추가금이 없지만(2026-08-16 확인),
-// 금펄·은펄 계열처럼 양면 선택 시 추가금이 붙는 용지는 papers.js에 doubleSidePremium을
-// 지정해두면 여기서 자동으로 반영됩니다.
-function optionFee(o, selOptions, paper) {
-  if (o.code === "OPT001") {
-    if (paper?.doubleSidePremium != null && selOptions?.OPT001?.choice === "double") return paper.doubleSidePremium;
-    return 0;
-  }
-  if (o.code === "OPT002" && paper?.earRoundFee != null) return paper.earRoundFee;
-  if (o.code === "OPT004" || o.code === "OPT005") {
-    const value = selOptions?.[o.code]?.choice;
-    const base = value === "horizontal" ? 7000 : 5000;
-    return Math.round(base * 1.1 * 1.1);
-  }
-  return o.fee;
-}
-
-// 용지 선택 시 기본으로 세팅할 옵션값 (인쇄 방식은 필수이므로 단면명함을 기본값으로 지정)
-function defaultSelOptions(category, paper, memberType) {
-  const opts = availableOptions(category, paper, memberType);
-  const hasPrintSide = opts.some((o) => o.code === "OPT001");
-  return hasPrintSide ? { OPT001: { choice: "single" } } : {};
-}
-
-// 옵션 + 선택값을 사람이 읽을 수 있는 문구로 변환 (예: "인쇄 방식(양면명함)", "귀도리(4mm)(좌상/우상)")
-function describeSelectedOption(o, sel) {
-  if (!o) return null;
-  if (!o.choice) return o.name;
-  const raw = sel?.choice;
-  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-  const labels = values.map((v) => o.choice.find((c) => c.value === v)?.label).filter(Boolean);
-  return labels.length ? `${o.name}(${labels.join("/")})` : o.name;
-}
-
-// ==================== screens/Payment ====================
-function Payment({ order, patch, go, back, paper, category, unit, optTotal, shipFee, goodsTotal, grandTotal }) {
-  const [agreedTerms, setAgreedTerms] = useState(false);
-  const [validationMsg, setValidationMsg] = useState("");
-  const [highlightTerms, setHighlightTerms] = useState(false);
-  const depositorRef = React.useRef(null);
-  const termsBoxRef = React.useRef(null);
-  const optLines = Object.entries(order.selOptions)
-    .map(([code, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === code), sel))
-    .filter(Boolean);
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.paymentTitle} onBack={back} step={6} go={go} />
-      <div style={{ padding: "6px 18px 16px" }}>
-        <Card style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.orderSummaryTitle}</div>
-          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
-          <SummaryRow k={TEXTS.summaryPaperLabel} v={paper?.name} />
-          {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
-          <SummaryRow k={TEXTS.summaryOptionLabel} v={optLines.length ? optLines.join(", ") : TEXTS.summaryNone} />
-          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
-          <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
-        </Card>
-
-        <Card style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
-          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
-          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
-          <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
-          {order.bundlePhone?.trim() && <SummaryRow k={TEXTS.bundleShippingTitle} v={order.bundlePhone} />}
-          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 14, fontWeight: 900 }}>{TEXTS.grandTotalLabel}</span>
-            <span style={{ fontSize: 17, fontWeight: 900, color: "var(--stamp)" }}>{won(grandTotal)}</span>
-          </div>
-        </Card>
-
-        <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 12 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <Landmark size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{TEXTS.bankInfoTitle}</div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.bankAccount}</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.bankHolder}</div>
-            </div>
-          </div>
-        </Card>
-
-        <Field label={TEXTS.depositorLabel}><input ref={depositorRef} style={inputStyle} value={order.depositor} onChange={(e) => patch({ depositor: e.target.value })} placeholder={TEXTS.depositorPlaceholder} /></Field>
-
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 10, lineHeight: 1.5 }}>{TEXTS.cmykColorNotice}</div>
-
-        {/* 2026-08-04: "체크를 해야 버튼이 눌리는데, 그걸 몰랐다"는 신고 반영 —
-            기존엔 옅은 회색 글씨 + 작은 체크박스뿐이라 눈에 잘 안 띄었습니다.
-            제목이 있는 박스로 감싸서 "여기 뭔가 확인할 게 있다"는 게 먼저
-            눈에 들어오게 했습니다. */}
-        <div
-          ref={termsBoxRef}
-          onClick={() => { setAgreedTerms((v) => !v); setValidationMsg(""); }}
-          style={{
-            marginTop: 14, padding: "12px 14px", borderRadius: 12, cursor: "pointer",
-            border: `${highlightTerms ? 2.5 : 1.5}px solid ${agreedTerms ? "var(--stamp)" : "#F0B429"}`,
-            background: agreedTerms ? "rgba(108,76,240,0.05)" : "#FFFBEB",
-            boxShadow: highlightTerms ? "0 0 0 4px rgba(240,180,41,0.35)" : "none",
-            transition: "box-shadow 0.3s, border-width 0.2s",
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 800, color: agreedTerms ? "var(--stamp)" : "#B45309", marginBottom: 6 }}>
-            {TEXTS.termsAgreementBoxTitle}
-          </div>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <div style={{
-              width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0,
-              border: `1.5px solid ${agreedTerms ? "var(--stamp)" : "var(--line)"}`,
-              background: agreedTerms ? "var(--stamp)" : "#fff",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              {agreedTerms && <Check size={12} color="#fff" />}
-            </div>
-            <span style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>{TEXTS.termsLogoLiabilityLabel}</span>
-          </div>
-        </div>
-      </div>
-      <div style={{ padding: "8px 18px 18px" }}>
-        {validationMsg && (
-          <div style={{
-            fontSize: 12, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
-            borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontWeight: 700, textAlign: "center",
-          }}>
-            {validationMsg}
-          </div>
-        )}
-        <PrimaryButton
-          looksDisabled={!order.depositor || !agreedTerms}
-          icon={CreditCard}
-          onClick={async () => {
-            // 2026-08-07: "체크박스를 못 찾아서 버튼이 안 눌린다"는 신고 반영 —
-            // 예전엔 조건이 안 맞으면 버튼 자체가 브라우저 disabled 상태라 눌러도
-            // 아무 반응이 없었습니다(React onClick조차 안 불림). 이제 버튼은 항상
-            // 눌리고, 조건이 안 맞으면 뭐가 문제인지 알려주고 그 위치로 화면을
-            // 이동시켜서 스스로 원인을 못 찾는 일이 없게 했습니다.
-            if (!order.depositor) {
-              setValidationMsg(TEXTS.paymentMissingDepositor);
-              depositorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-              depositorRef.current?.focus();
-              return;
-            }
-            if (!agreedTerms) {
-              setValidationMsg(TEXTS.paymentMissingAgreement);
-              termsBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-              setHighlightTerms(true);
-              setTimeout(() => setHighlightTerms(false), 1500);
-              return;
-            }
-            setValidationMsg("");
-            // 실제 서비스에서는 이 주문번호를 서버가 발급해야 합니다.
-            // 지금은 프론트엔드 프로토타입이라 임시로 생성하고, 새로고침 전까지는 값이 바뀌지 않도록 order 상태에 저장해둡니다.
-            const orderNo = `BC${Date.now().toString().slice(-8)}`;
-            patch({ orderNo });
-            // 2026-08-04: 예전에 여기 있던 window.storage 기록(orderByPhone)을 지웠습니다 —
-            // Home.jsx의 "내 주문 조회"가 이제 실제 서버를 조회하므로, 이 기록을 읽는
-            // 코드가 더 이상 없어서 그대로 두면 아무 효과 없이 개인정보만 남기는
-            // 죽은 코드였습니다. ⚠️ 다만 이 기록에만 있던 printFileSvg(인쇄파일)·
-            // specialOrderFile(특별회원 업로드 파일)은 서버 쪽에 아직 저장할 곳이
-            // 없어서, 지금은 재주문 시 "저장된 파일 그대로" 가져오는 기능 자체가
-            // 없습니다 — design_recipe가 있는 주문만 그 설계도로 다시 만들 수 있습니다
-            // (Supabase Storage 연동 전까지의 알려진 한계).
-            // 2026-08-04: 실제 서버(Render+Supabase)가 배포되면서 recordNewOrder가
-            // 진짜 데이터베이스에 저장합니다. 이 저장은 실패해도 결제 접수 자체를
-            // 막으면 안 되므로(서버가 잠깐 응답 없거나 일시적 오류가 나도 고객은
-            // 정상적으로 다음 화면으로 넘어가야 함), await 없이 그대로 흘려보냅니다.
-            recordNewOrder(orderNo, {
-              customerPhone: order.ship?.phone?.trim(), customerName: order.ship?.name || order.name,
-              categoryCode: category?.code, paperCode: order.paperCode, paperChoice: order.paperChoice,
-              options: order.selOptions, sets: order.sets, memberType: order.memberType,
-              amountTotal: grandTotal, depositorName: order.depositor, shipping: order.ship,
-              designRecipe: order.designRecipe || null,
-              bundlePhone: order.bundlePhone?.trim() || null,
-            }).catch((err) => console.error("관리자 주문 기록 저장 실패:", err));
-            // 이메일 발송 실패가 주문 접수 자체를 막으면 안 되므로, 실패해도 무시하고
-            // 화면은 그대로 진행합니다 — 관리자 알림이 안 갔다고 고객의 주문을 막는 건
-            // 우선순위가 거꾸로입니다.
-            // 첨부는 둘 중 하나입니다: AI로 디자인했으면 방금 만든 인쇄용 SVG,
-            // 특별회원이면 직접 올린 파일. 이제 결제만 되면 실제 인쇄 파일이 관리자
-            // 이메일로 갑니다 — 지금까지 없던, 가장 중요한 마지막 단계입니다.
-            const attachment = order.printFileSvg
-              ? { dataUrl: svgToDataUrl(order.printFileSvg) }
-              : (order.specialOrderFile || null);
-            sendOrderNotificationEmail(order, orderNo, {
-              categoryName: category?.name, paperName: paper?.name,
-              optionsSummary: optLines.length ? optLines.join(", ") : null,
-              totalPrice: grandTotal,
-            }, attachment).catch((err) => console.error("주문 알림 이메일 발송 실패:", err));
-            go("complete");
-          }}
-        >
-          {TEXTS.paymentSubmitBtn}
-        </PrimaryButton>
-      </div>
-    </div>
-  );
-}
-
-// ==================== domain/validation/index ====================
-// Validation Domain — Kernel이 "정의"한 규칙을 실제로 "판정"하는 곳.
-// (AI → Recommendation → Frame → Asset → Validation → Renderer)
-//
-// cpValidator / marginValidator / qrValidator는 기존에 Kernel에 있던 판정
-// 로직을 역할에 맞게 옮겨온 것이고, overlapValidator만 이번에 새로 만들었습니다
-// — "실제 책임이 생길 때 분리한다" 원칙대로, 없던 검사를 미리 만들지 않았습니다.
-
-// ==================== domain/company/logoExtraction ====================
-// ====================================================================
-// Domain : Company / Logo Extraction
-// Responsibility : 명함·안내문·간판 사진 등 "로고가 일부만 포함된 사진"에서
-//                  로고 영역만 잘라내기.
-//
-// 설계 방향(중요): 배경까지 완전히 투명하게 지우는 이미지 분할(segmentation)이
-// 아니라, "이 사진에서 로고가 대략 어디 있는지" 위치만 비전 모델에게 물어보고,
-// 그 사각형 영역만 Canvas로 자릅니다. 전용 컴퓨터 비전 엔진을 직접 만드는 것보다
-// 훨씬 간단하고, 이미 있는 비전 API(여기서는 Claude API의 이미지 입력)로 충분합니다.
-// 배경이 완전히 투명하지 않고 사각형으로만 잘리는 것은 의도된 한계입니다 —
-// 필요성이 실제로 확인되면 그때 배경 제거를 별도로 추가합니다.
-// ====================================================================
-
-// 프롬프트를 한 곳에 모아둔 객체 — recommendationEngine.js와 같은 패턴입니다.
-// 아직 이거 하나뿐이라 별도 폴더(prompt/)로는 나누지 않았습니다.
-const LOGO_EXTRACTION_PROMPTS = {
-  extractLogo: `이 사진 안에 회사 로고가 보이면, 그 로고를 감싸는 사각형 영역을
-이미지 전체 크기에 대한 백분율(0~100)로 알려줘. 다른 설명 없이 아래 JSON 형식으로만 답변해:
-{"found": true, "x": 왼쪽 끝 %, "y": 위쪽 끝 %, "width": 너비 %, "height": 높이 %}
-로고를 찾지 못하면 {"found": false} 로만 답변해.`,
-};
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(",")[1]); // "data:...;base64," 접두어 제거
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// 사진 안에서 로고가 있는 대략의 위치를 비전 모델에게 물어봅니다.
-// 반환값은 이미지 크기에 대한 상대 좌표(0~100, %)입니다 — 픽셀 좌표를 바로 받으면
-// 모델이 실제 표시 크기를 몰라 부정확해지기 쉬워서, 항상 %로 답하게 합니다.
-async function detectLogoRegion(file) {
-  const base64 = await fileToBase64(file);
-  const prompt = LOGO_EXTRACTION_PROMPTS.extractLogo;
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 200,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 } },
-          { type: "text", text: prompt },
-        ],
-      }],
-    }),
-  });
-  if (!response.ok) throw new Error(`로고 위치 감지 실패 (${response.status})`);
-  const data = await response.json();
-  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(cleaned);
-  if (!parsed.found) return null;
-
-  // 값 방어: 모델이 범위를 벗어난 값을 줄 수 있으니 0~100 사이로 잘라줍니다.
-  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
-  return { x: clamp(parsed.x), y: clamp(parsed.y), width: clamp(parsed.width), height: clamp(parsed.height) };
-}
-
-// 원본 이미지에서 region(%) 영역만 Canvas로 잘라 새 이미지(Blob)를 만듭니다.
-function cropImageToRegion(file, region) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      try {
-        const sx = (region.x / 100) * img.naturalWidth;
-        const sy = (region.y / 100) * img.naturalHeight;
-        const sw = (region.width / 100) * img.naturalWidth;
-        const sh = (region.height / 100) * img.naturalHeight;
-        const canvas = document.createElement("canvas");
-        canvas.width = sw;
-        canvas.height = sh;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-        URL.revokeObjectURL(url);
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("자르기 실패"))), "image/png");
-      } catch (err) {
-        URL.revokeObjectURL(url);
-        reject(err);
-      }
-    };
-    img.onerror = () => reject(new Error("이미지 로드 실패"));
-    img.src = url;
-  });
-}
-
-// 잘라낸 로고가 너무 작으면(사진을 멀리서 찍은 경우 등) 명함에 쓰기엔 화질이
-// 부족할 수 있습니다. 정교한 블러 감지 대신, 가장 흔한 문제(해상도 부족)만 우선 확인합니다.
-const MIN_LOGO_DIMENSION = 200; // px — 이보다 작으면 명함 인쇄에 부적합할 가능성이 큼
-
-function checkImageQuality(file) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const ok = img.naturalWidth >= MIN_LOGO_DIMENSION && img.naturalHeight >= MIN_LOGO_DIMENSION;
-      resolve({ ok, width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({ ok: false, width: 0, height: 0 });
-    };
-    img.src = url;
-  });
-}
-
-// 전체 과정을 하나로 묶은 진입점. 로고를 못 찾으면 null을 반환합니다 —
-// 이 경우 호출한 쪽에서 "직접 잘라서 다시 올려주세요" 같은 안내로 이어가면 됩니다.
-async function extractLogoFromPhoto(file) {
-  const region = await detectLogoRegion(file);
-  if (!region) return null;
-  const blob = await cropImageToRegion(file, region);
-  return new File([blob], `logo_${Date.now()}.png`, { type: "image/png" });
-}
-
-// ==================== domain/company/emailVerification ====================
-// ====================================================================
-// Domain : Company / Email Verification
-// Responsibility : 회사 이메일 소유 여부를 실제로 증명하는 절차 (도메인 문자열
-//                  일치만으로는 증명이 안 됨 — 누구나 타이핑만으로 남의 회사
-//                  이메일을 입력할 수 있기 때문에, 그 메일함에 실제로 접근
-//                  권한이 있는지 인증코드로 확인합니다).
-//
-// 아래 세 값은 전부 실제로 확인된 값입니다(2026-07-29): SERVICE_ID는 orderNotification.js
-// 와 같은 계정, TEMPLATE_ID는 "One-Time Password" 템플릿(변수: to_email/verification_code
-// 확인됨), PUBLIC_KEY도 EmailJS 대시보드에서 직접 확인. 이제 자리표시자가 아닙니다.
-// ====================================================================
-const EMAILJS_SERVICE_ID = "service_c48f848";
-const EMAILJS_VERIFY_TEMPLATE_ID = "template_zbv0idi";
-const EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
-
-const CODE_LENGTH = 6;
-const CODE_VALID_MS = 5 * 60 * 1000; // 5분
-
-function generateVerificationCode() {
-  const min = 10 ** (CODE_LENGTH - 1);
-  const max = 10 ** CODE_LENGTH - 1;
-  return String(Math.floor(min + Math.random() * (max - min + 1)));
-}
-
-// EmailJS REST API로 직접 POST — SDK를 새로 설치하지 않아도 되도록 fetch만 사용합니다.
-// (getStyleSuggestion이 Anthropic API를 fetch로 직접 호출하는 것과 같은 방식)
-async function sendVerificationEmail(email, code) {
-  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_VERIFY_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY,
-      template_params: { to_email: email, verification_code: code },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`이메일 발송 실패 (${res.status})`);
-  }
-}
-
-// 사용자가 입력한 코드가 실제로 보낸 코드와 일치하고, 유효시간 안인지 확인.
-function checkVerificationCode(inputCode, sentCode, sentAt) {
-  if (!sentCode || !sentAt) return { ok: false, reason: "not_sent" };
-  if (Date.now() - sentAt > CODE_VALID_MS) return { ok: false, reason: "expired" };
-  if (inputCode !== sentCode) return { ok: false, reason: "mismatch" };
-  return { ok: true };
-}
-
-// ==================== domain/asset/moodIntensity ====================
-// [Asset Domain: Catalog] ── Mood Intensity Table v1.0 ─────
-// "업종별로 배경의 존재감(강도)을 다르게 준다"는 원칙을 담은 표입니다.
-//
-// 정직하게 밝히는 것: 이 숫자들(10, 30, 35...)은 실제 명함 데이터를 분석해서 나온
-// 통계가 아닙니다 — 사장님이 업종별로 판단한 디자인 기준값입니다. DRS의 안전마진
-// (3mm)이나 최소 폰트 크기와 같은 종류입니다: 사람이 정한 설계값이지 측정값이
-// 아닙니다. 나중에 Learning Domain이 실사용 데이터를 충분히 모으면, 이 값들을
-// 실제 데이터 기반 값으로 검증하거나 대체할 수 있습니다 — 그 전까지는 이게
-// "합리적인 기본값" 역할을 합니다.
-//
-// intensity는 0~100 사이 값으로, "배경 이미지가 카드에서 얼마나 존재감 있게
-// 보여야 하는가"를 뜻합니다. 낮을수록 거의 흰 배경에 가깝고(신뢰감 우선),
-// 높을수록 배경이 분위기를 적극적으로 표현합니다(개성·정서 우선).
-//
-// industryDetector.js가 실제로 인식하는 9개 업종(INDUSTRY_KEYWORDS)에 맞춰
-// 만들었습니다 — "음식점", "꽃집"처럼 아직 인식 목록에 없는 업종은 넣지 않았습니다
-// (실제로 감지도 안 되는 업종에 값만 미리 만들어두는 건 "없는 걸 있는 것처럼"
-// 다루는 것과 비슷한 문제라서요). industryDetector.js에 새 업종이 추가되면 이
-// 표에도 같이 추가해야 합니다 — frameCodes.js의 INDUSTRY_PREFIXES와 같은 원칙.
-const MOOD_INTENSITY_BY_INDUSTRY = {
-  "보험": 10,
-  "의료": 10,
-  "법률": 8,
-  "부동산": 15,
-  "교육": 15,
-  "카페": 30,
-  "베이커리": 25,
-  "미용업": 35,
-  "스튜디오": 30,
-};
-const MOOD_INTENSITY_DEFAULT = 15; // 업종 미감지 시 — 부동산/교육과 같은 중간값으로 보수적으로 시작
-
-function getMoodIntensity(industry) {
-  return MOOD_INTENSITY_BY_INDUSTRY[industry] ?? MOOD_INTENSITY_DEFAULT;
-}
-
-// ==================== domain/generative/backgroundEngine ====================
-// ====================================================================
-// Domain : Generative / Background Engine
-// Version : 0.1 (뼈대만 — 실제 이미지 생성 API 없이는 완성될 수 없음)
-// Responsibility : 업종·스타일 태그·색상·분위기 강도를 받아 배경 이미지 생성
-//                  프롬프트를 조립하고, 결과를 업종 단위로 캐싱합니다.
-// 2026-08-04: 캐시 저장을 shared:true → shared:false로 바꿨습니다 — 이 캐시는 다른
-// 사용자와 공유될 이유가 딱히 없었고(업종별 캐시라 공유되면 오히려 다른 회사
-// 결과가 섞여 보일 수 있었음), Claude 아티팩트의 "공유 데이터 접근" 권한 팝업이
-// 뜨는 원인 중 하나였습니다. 개인 저장(shared:false)으로도 캐싱 목적은 그대로
-// 달성되고, 팝업도 안 뜹니다.
-//
-// 정직하게 밝히는 한계: callImageGenerationApi()는 실제로 이미지를 생성하지
-// 않습니다. 이 프로젝트에는 텍스트 완성(getStyleSuggestion)과 비전 분석
-// (extractLogoFromPhoto) API 호출은 있지만, 이미지를 생성하는 API 호출은
-// 아직 하나도 없습니다 — Claude API 자체가 이미지를 생성하지 않고, DALL-E나
-// Stable Diffusion, Imagen 같은 별도 서비스와 API 키가 필요합니다. 그 키는
-// 사장님이 해당 서비스에 가입해서 직접 발급받아야 하는 값이라 여기서 대신
-// 채워둘 수 없습니다. 아래 함수는 그 키가 준비됐을 때 내부 구현만 바꾸면
-// 나머지(프롬프트 조립·캐싱·호출 시점)는 전부 그대로 쓸 수 있도록 만든
-// 자리입니다 — 지금 호출하면 항상 { available: false }를 반환합니다.
-// ====================================================================
-
-
-
-// 업종+태그+색상 → 실제 이미지 생성 서비스에 보낼 프롬프트 문자열.
-// intensity(강도)는 숫자를 그대로 프롬프트에 노출하기보다("15% 존재감을 그려줘"는
-// 이미지 생성 모델이 이해하기 어려운 지시라서), "은은하게/적당히/뚜렷하게" 같은
-// 정성적 표현으로 변환해서 넣습니다.
-function intensityToDescriptor(intensity) {
-  if (intensity <= 12) return "매우 은은하고 거의 안 보일 정도로 절제된";
-  if (intensity <= 22) return "은은한";
-  if (intensity <= 32) return "적당히 느껴지는";
-  return "뚜렷하고 분위기가 살아있는";
-}
-
-function buildBackgroundPrompt(industry, styleTags = [], colorLabel = null) {
-  const intensity = getMoodIntensity(industry);
-  const descriptor = intensityToDescriptor(intensity);
-  const tagsPart = styleTags.length ? styleTags.join(", ") : "전문적이고 신뢰감 있는";
-  const colorPart = colorLabel ? `주요 색상은 ${colorLabel} 계열로,` : "";
-  return `명함 배경 이미지를 만들어줘. 업종은 "${industry || "일반"}"이고, ${colorPart} ${descriptor} 정도의 텍스처/일러스트를 써줘.
-분위기 키워드: ${tagsPart}.
-중요: 텍스트를 얹을 자리이므로 중앙과 하단 영역은 비교적 단순하게 비워두고, 명함 규격(90x50mm, 가로형)에 맞는 여백 있는 구성으로 만들어줘.
-장식이 과하지 않게, "특이하다"보다 "깔끔하고 전문적이다"는 인상을 우선해줘.`;
-}
-
-// 실제 이미지 생성 API 호출 자리. 지금은 항상 이용 불가로 답합니다 — 가짜 이미지나
-// 플레이스홀더 URL을 만들어 반환하지 않습니다(그렇게 하면 "작동하는 것처럼" 보이는
-// 화면을 만들게 되어, 오늘 계속 경계해온 "없는 걸 있는 것처럼" 문제가 됩니다).
-// 2026-08-08: 실제로 연결됐습니다 — Render 서버(routes/backgroundGen.js)를 거쳐
-// Replicate의 Flux Schnell 모델을 부릅니다. ⚠️ 비용이 실제로 발생하는 호출입니다
-// (장당 약 1~4원, 2026-08 기준) — 호출 빈도 제한(예: 디자인당 재생성 몇 회까지)은
-// 아직 프론트엔드에 없습니다. 실제로 이 기능을 디자인 화면에 노출하기 전에
-// 반드시 재생성 횟수 제한을 추가해서 비용이 예측 불가능해지는 것을 막아야 합니다.
-async function callImageGenerationApi(prompt, widthMm = 90, heightMm = 50) {
-  try {
-    const res = await fetch(`${RENDER_API_BASE}/api/generate-background`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, widthMm, heightMm }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      console.error("배경 생성 실패:", body.error);
-      return { available: false, images: [] };
-    }
-    const body = await res.json();
-    return { available: true, images: body.images || [] };
-  } catch (err) {
-    console.error("배경 생성 요청 중 예외:", err.message);
-    return { available: false, images: [] };
-  }
-}
-
-// 업종+스타일 태그+색상 조합 단위로 캐싱합니다 — getStyleSuggestion과 같은 패턴
-// (같은 조합이면 여러 사용자가 재사용, API 호출·비용을 아낌). 캐시 키에 회사명이나
-// 개인정보는 포함하지 않습니다.
-async function generateBackgroundOptions(industry, styleTags = [], colorId = null, widthMm = 90, heightMm = 50) {
-  const cacheKey = `bg:${industry || "GEN"}:${[...styleTags].sort().join(",")}:${colorId || "any"}:${widthMm}x${heightMm}`;
-  try {
-    const cached = await window.storage.get(cacheKey, false);
-    if (cached?.value) return JSON.parse(cached.value);
-  } catch {
-    // 캐시에 없으면 아래에서 생성 시도로 이어짐
-  }
-
-  const prompt = buildBackgroundPrompt(industry, styleTags, colorId);
-  const result = await callImageGenerationApi(prompt, widthMm, heightMm);
-  const response = { ...result, prompt, industry };
-
-  if (result.available) {
-    try {
-      await window.storage.set(cacheKey, JSON.stringify(response), false);
-    } catch {
-      // 저장 실패해도 이번 결과는 그대로 반환
-    }
-  }
-  return response;
-}
-
-// ==================== domain/learning/index ====================
-// Learning Domain — "기록만 남겨두는 배관(plumbing)". STEP 7 전체(통계, 승격/강등
-// 판단, changeReason 수집 UI)는 아직 만들지 않습니다 — 실사용 데이터가 없는 상태에서
-// 만들면 검증 안 된 걸 마치 학습된 것처럼 보여주는 셈이기 때문입니다(예전에 뺀 가짜
-// "★★★★★ 인기순위"와 같은 문제).
-//
-// Learning Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   Phase 1 [x] classifier.js  — Standard/Creative Exception/Invalid Exception 분류
-//   Phase 1 [x] recorder.js    — 기록 저장(KPR 초기 status만 부여, 승격·강등 로직 없음)
-//   Phase 2 [ ] statistics.js  — 업종별 %분포 등 실제 통계 계산 (실사용 데이터 쌓인 뒤)
-//   Phase 3 [ ] memory.js      — standardMemory/creativeExceptionMemory/invalidExceptionMemory
-//                                조회 API (지금은 recorder.js 안에서 저장 키만 씀, 별도 조회 기능 없음)
+// Asset Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
+//   catalog(지금) — 정적 카탈로그: 사람이 미리 정의해둔 선택지
+//   learning(미래) — STEP 7 Learning이 완성되면 learnedStyles.js/learnedColors.js가 생기고,
+//                    AI는 catalog + learning 둘을 함께 참고하게 됨. 아직 실사용 데이터가
+//                    없어 지금은 만들지 않음 (Company Domain의 companyLearning.js와 동일한 이유).
 
 // ==================== renderer/CardLayoutPreview ====================
 // 2026-08-01: "포토샵처럼 줄이 맞는지 비교해달라"는 요청으로 추가한 정렬 가이드용
@@ -3408,6 +3517,554 @@ function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = t
   );
 }
 
+// ==================== domain/export/cardFileExporter ====================
+// ====================================================================
+// Domain : Export / Card File Exporter
+// Version : 1.0 (신규 — 가장 중요한 공백을 메우는 파일)
+// Responsibility : 화면에 그려지는 미리보기(CardLayoutPreview)를 실제 인쇄에 쓸 수 있는
+//                  파일로 변환합니다. 지금까지 이 앱은 결제까지는 완벽했지만, "AI가
+//                  디자인한 명함을 실제 파일로 뽑아내는" 마지막 단계가 없었습니다 —
+//                  그게 없으면 인쇄소에 넘길 게 아무것도 없다는 지적이 정확했습니다.
+//
+// 왜 PNG나 PDF가 아니라 SVG인가:
+//   이 환경(브라우저)에서 실제로 만들 수 있는 도구 중, 별도 라이브러리 설치 없이
+//   벡터(글자가 확대해도 안 깨지는) 파일을 만들 수 있는 유일한 방법이 SVG입니다.
+//   SVG는 width/height를 "mm" 단위로 직접 지정할 수 있어서, 실물 명함 크기(예:
+//   90mm x 50mm)를 그대로 표현하는 진짜 물리적 치수의 파일이 됩니다 — 화면 픽셀을
+//   흉내 낸 이미지가 아니라, 인쇄소가 실제로 열어서 쓸 수 있는 벡터 원고입니다.
+//   대부분의 인쇄소·에디터(일러스트레이터, Inkscape 등)가 SVG를 직접 엽니다.
+//
+// 정직하게 밝히는 한계:
+//   - CMYK 색공간 변환은 안 합니다(SVG는 RGB로 정의됩니다) — 실제 인쇄 시 색상이
+//     미세하게 다르게 나올 수 있고, 이건 결제 화면에 안내 문구로 남겨야 합니다.
+//   - 재단선·눈금(크롭 마크)은 이 버전에 없습니다 — 안전영역·재단선 좌표 자체는
+//     정확하지만, 인쇄소가 요구하는 크롭마크 표시는 필요해지면 추가해야 합니다.
+//   - pt(포인트) 크기는 여기서는 실제 물리 단위(1pt = 0.3527778mm)로 정확히
+//     환산합니다 — 화면 미리보기(CardLayoutPreview)의 pt는 "표시상의 상대 크기"였지만,
+//     이 파일은 실제로 인쇄될 원고라 정확한 환산이 필요하고, 여기서 처음 제대로 합니다.
+// ====================================================================
+
+
+
+
+
+const PT_TO_MM = 0.3527778;
+// 기존 emphasis(lg/md/sm) 기반 레이아웃(예: 사진형이 아직 patternSelections 없이 쓰일 때)은
+// pointSize가 없으므로, kernel/designRules.js의 TEXT_EMPHASIS_SIZE.full 값을 그대로
+// pt로 간주합니다. 2026-08-01: 예전엔 이 파일에 { lg: 13, md: 10, sm: 8.5 }를 따로
+// 하드코딩해 놨었는데, 그러다 보니 미리보기(designRules.js)에서 글자 크기를 키워도
+// 실제 인쇄파일(이 파일)에는 반영이 안 되는 문제가 있었습니다. 이제 designRules.js를
+// 그대로 import해서 쓰므로 두 곳이 항상 같은 값을 씁니다.
+const EMPHASIS_PT_FALLBACK = TEXT_EMPHASIS_SIZE.full;
+
+function escapeXml(str) {
+  return String(str).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
+}
+
+function textFor(key, fields, nameEnglish) {
+  if (key === "company") return fields?.["companyName"] || "회사명";
+  if (key === "position") return fields?.["position"] || "직위";
+  if (key === "personName") {
+    const base = fields?.["personName"] || "성명";
+    return nameEnglish?.trim() ? `${base} (${nameEnglish.trim()})` : base;
+  }
+  if (key === "mobile") return fields?.mobile?.trim() || null;
+  if (key === "telephoneFax") {
+    const tel = fields?.telephone?.trim();
+    const fax = fields?.fax?.trim();
+    if (tel && fax) return `${tel} · Fax ${fax}`;
+    if (tel) return tel;
+    if (fax) return `Fax ${fax}`;
+    return null;
+  }
+  if (key === "address") return fields?.address?.trim() || null;
+  if (key === "email") return fields?.email?.trim() || null;
+  if (key === "website") return fields?.website?.trim() || null;
+  if (key === "etc") return fields?.etc?.trim() || null;
+  return "";
+}
+
+// CardLayoutPreview.jsx와 정확히 같은 규칙(임계값 기반 정렬)을 씁니다 — 미리보기와
+// 실제 파일이 서로 다른 위치로 나오면 "본 것과 다르게 인쇄됐다"는 신뢰 문제가 생기므로,
+// 여기 계산은 renderer/CardLayoutPreview.jsx의 로직과 반드시 같게 유지해야 합니다.
+function alignFor(x) {
+  return x <= DESIGN_RULES.alignment.leftThreshold ? "left" : x >= DESIGN_RULES.alignment.rightThreshold ? "right" : "center";
+}
+function valignFor(y) {
+  return y <= DESIGN_RULES.alignment.leftThreshold ? "top" : y >= DESIGN_RULES.alignment.rightThreshold ? "bottom" : "middle";
+}
+
+function buildCardSVG({
+  templateName, photoVariant, showLogo = true, fields, cardSize, patternSelections = null,
+  fontFamilyId = null, backgroundStyle = "white", logoColor = null, logoDataUrl = null,
+  nameEnglish = "", showContactIcon = true, qrEnabled = false, orientation = null,
+}) {
+  // 2026-08-01: 미리보기와 마찬가지로, 명시적으로 고른 orientation이 있으면 그걸
+  // 그대로 쓰고(가로형/세로형을 직접 고를 수 있게 됐으므로), 없을 때만 예전처럼
+  // 사진 상단형/하단형 여부로 자동 추정합니다.
+  const spec = getCardSpec(cardSize, orientation || (isPortraitPhotoVariant(templateName, photoVariant) ? "portrait" : "landscape"));
+  const workingW = spec.trimWidth + spec.bleed * 2;
+  const workingH = spec.trimHeight + spec.bleed * 2;
+  const safeWidthMm = spec.trimWidth - spec.safeMargin * 2;
+  const safeHeightMm = spec.trimHeight - spec.safeMargin * 2;
+  const safeOriginXMm = spec.bleed + spec.safeMargin;
+  const safeOriginYMm = spec.bleed + spec.safeMargin;
+
+  const photoRect = templateName === "사진형" ? (PHOTO_RECT_BY_VARIANT[photoVariant] || PHOTO_RECT_BY_VARIANT[PHOTO_TEMPLATES[0]]) : {};
+  const layout = patternSelections
+    ? { ...photoRect, ...buildLayoutFromPatterns(patternSelections, { overlay: templateName === "사진형" && !!PHOTO_TEMPLATE_PATTERN_SELECTIONS[photoVariant]?.overlay }) }
+    : getLayoutFor(templateName, photoVariant);
+
+  const bgOption = BACKGROUND_STYLE_OPTIONS.find((b) => b.id === backgroundStyle);
+  const needsLightText = bgOption?.dark === true;
+  const fontForKind = (kind) => {
+    const id = typeof fontFamilyId === "string" ? fontFamilyId : (fontFamilyId?.[kind] || fontFamilyId?.default);
+    return resolveFontFamily(id);
+  };
+  const CONTACT_SUB_KINDS = ["mobile", "telephoneFax", "address", "email", "website", "etc"];
+  const anyContactFilled = CONTACT_SUB_KINDS.some((k) => layout[k] && textFor(k, fields, nameEnglish));
+
+  const parts = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${workingW}mm" height="${workingH}mm" viewBox="0 0 ${workingW} ${workingH}">`);
+  // 배경(도련 전체 — 실제 인쇄에서는 도련까지 배경색이 깔려야 흰 테두리가 안 남습니다)
+  const bgFill = bgOption?.id === "gradient" ? "url(#bgGradient)" : (bgOption?.id === "soft" ? "#F4F1FB" : "#FFFFFF");
+  if (bgOption?.id === "gradient") {
+    parts.push(`<defs><linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6C4CF0"/><stop offset="100%" stop-color="#4C6FFF"/></linearGradient></defs>`);
+  }
+  parts.push(`<rect x="0" y="0" width="${workingW}" height="${workingH}" fill="${bgFill}"/>`);
+
+  // 2026-08-02: "안전영역 재정의" 반영 — 텍스트·로고는 안전영역(safeMargin) 안에
+  // 머물러야 하지만(기존 그대로, resolveElementPosition의 clampToAllowedRegion이
+  // 담당), 배경색·그림(사진)처럼 "디자인의 배경이 되는 요소"는 재단선(trim)이 아니라
+  // 도련까지 포함한 작업선까지 꽉 채워야 합니다 — 재단 시 아주 약간의 오차가 있어도
+  // 흰 테두리가 남지 않게 하기 위해서입니다. 배경색은 이미 도련 전체를 채우고
+  // 있었는데(위 rect), 사진(photo) rect는 trim 기준으로만 계산되어 있어서 카드
+  // 가장자리에 닿는 사진(사진 배경형·상단형·하단형·분할형·우측형)에서 도련만큼
+  // 얇게 흰 여백이 남는 진짜 버그가 있었습니다. 아래에서, 사진 영역이 원래 카드의
+  // 어느 가장자리(0% 또는 100%)에 닿아있었는지 보고, 닿아있던 쪽으로만 도련만큼
+  // 밀어서 확장합니다(중앙에 떠 있는 프로필 원형 같은 사진은 어느 쪽도 안 닿아있으니
+  // 그대로 둡니다).
+  if (layout.photo) {
+    // 2026-08-02: "사진형도 위치·크기를 옮길 수 있게 해달라"는 요청 반영 — 미리보기와
+    // 똑같은 함수(computeEffectivePhotoRect)로 사용자가 옮긴 만큼을 먼저 반영한
+    // "실제" rect를 구하고, 도련 확장 여부(아래)는 원래 정의가 아니라 이 조정된
+    // rect가 지금 가장자리에 닿아있는지를 기준으로 다시 판단합니다 — 그래야 사진을
+    // 조금 옮긴 뒤에도 도련 처리가 계속 정확합니다.
+    const photoOffsetMm = patternSelections?.photoFineOffsetMm || { x: 0, y: 0 };
+    const photoScale = patternSelections?.photoScale || 1;
+    const rect = computeEffectivePhotoRect(layout.photo.rect, photoOffsetMm, photoScale, spec.trimWidth, spec.trimHeight);
+    let px = spec.bleed + (rect.left / 100) * spec.trimWidth;
+    let py = spec.bleed + (rect.top / 100) * spec.trimHeight;
+    let pw = (rect.width / 100) * spec.trimWidth;
+    let ph = (rect.height / 100) * spec.trimHeight;
+    const EDGE_EPS = 0.01; // % 단위 반올림 오차 허용
+    if (rect.left <= EDGE_EPS) { px -= spec.bleed; pw += spec.bleed; }
+    if (rect.left + rect.width >= 100 - EDGE_EPS) { pw += spec.bleed; }
+    if (rect.top <= EDGE_EPS) { py -= spec.bleed; ph += spec.bleed; }
+    if (rect.top + rect.height >= 100 - EDGE_EPS) { ph += spec.bleed; }
+    if (layout.photo.shape === "circle") {
+      parts.push(`<clipPath id="photoClip"><ellipse cx="${px + pw / 2}" cy="${py + ph / 2}" rx="${pw / 2}" ry="${ph / 2}"/></clipPath>`);
+    }
+    parts.push(`<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#E9E7F5" ${layout.photo.shape === "circle" ? 'clip-path="url(#photoClip)"' : ""}/>`);
+    // 실제 고객 사진 파일은 이 자리에 <image>로 들어가야 하지만, 여기서는 사진 자체를
+    // 다루지 않습니다(사진형 주문은 아직 사진 업로드가 이 파이프라인과 안 이어져 있음 —
+    // 별도로 확인이 필요합니다).
+  }
+
+  // 각 요소(로고/회사명/이름·직위/연락처 세부항목)
+  for (const [key, pos] of Object.entries(layout)) {
+    if (pos.kind === "photo") continue;
+    if (pos.kind === "logo" && !showLogo) continue;
+    const text = textFor(key, fields, nameEnglish);
+    const isMobileFallback = key === "mobile" && text === null && !anyContactFilled;
+    if (text === null && !isMobileFallback) continue;
+    const displayText = isMobileFallback ? "010-0000-0000" : text;
+
+    const { x, y } = resolveElementPosition(pos.kind, pos, spec);
+    const xMm = safeOriginXMm + (x / 100) * safeWidthMm;
+    const yMm = safeOriginYMm + (y / 100) * safeHeightMm;
+    const align = alignFor(x);
+    const valign = valignFor(y);
+    const isLogo = pos.kind === "logo";
+
+    if (isLogo) {
+      // LOGO_SIZE_PERCENT의 full 모드 값(%, 안전영역 너비 기준)을 그대로 mm로 환산
+      const sizePercent = LOGO_SIZE_PERCENT.full[pos.size || "md"];
+      const sizeMm = (sizePercent / 100) * safeWidthMm;
+      const boxX = align === "left" ? xMm : align === "right" ? xMm - sizeMm : xMm - sizeMm / 2;
+      const boxY = valign === "top" ? yMm : valign === "bottom" ? yMm - sizeMm : yMm - sizeMm / 2;
+      if (logoDataUrl) {
+        parts.push(`<image x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
+      } else {
+        parts.push(`<rect x="${boxX}" y="${boxY}" width="${sizeMm}" height="${sizeMm}" fill="${resolveLogoColor(logoColor)}" stroke="rgba(0,0,0,0.18)" stroke-width="0.2"/>`);
+      }
+      continue;
+    }
+
+    const pointSizePt = pos.pointSize != null ? pos.pointSize : EMPHASIS_PT_FALLBACK[pos.emphasis || "md"];
+    const fontSizeMm = pointSizePt * PT_TO_MM;
+    const fontDef = fontForKind(key);
+    const fill = (pos.overlay || needsLightText) ? "#FFFFFF" : "#1A1A22";
+    const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
+    // SVG의 dominant-baseline만으로 valign(top/middle/bottom)을 정확히 맞추기 어려워서,
+    // y좌표 자체를 폰트 크기 기준으로 보정합니다 — 화면(CSS translate)과 같은 결과를 냅니다.
+    const yAdjusted = valign === "top" ? yMm + fontSizeMm * 0.8 : valign === "bottom" ? yMm - fontSizeMm * 0.2 : yMm + fontSizeMm * 0.3;
+    parts.push(
+      `<text x="${xMm}" y="${yAdjusted}" font-size="${fontSizeMm}" font-family="${escapeXml(fontDef.family.replace(/'/g, ""))}" font-weight="${fontDef.weight}" fill="${fill}" text-anchor="${anchor}">${escapeXml(displayText)}</text>`
+    );
+  }
+
+  parts.push(`</svg>`);
+  return parts.join("\n");
+}
+
+function svgToDataUrl(svgString) {
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgString)))}`;
+}
+
+// 뒷면 패널 하나만 그립니다 — BACK_LAYOUTS(domain/frame/backLayouts.js)의 logo/qr/blank/
+// text 중 하나("custom"은 사람이 직접 디자인하므로 여기서 다루지 않습니다).
+// 2026-08-01: "text"(문구형) 추가 — 여러 줄 문구를 정렬(왼쪽/가운데/오른쪽)·서체
+// 선택해서 넣을 수 있습니다. backContent = { lines: string[], align: "left"|"center"|"right", fontFamilyId }.
+function buildBackPanelSVG(choice, spec, offsetX, logoDataUrl, logoColor, backContent = null) {
+  const workingW = spec.trimWidth + spec.bleed * 2;
+  const workingH = spec.trimHeight + spec.bleed * 2;
+  const cx = offsetX + workingW / 2;
+  const cy = workingH / 2;
+  const parts = [`<rect x="${offsetX}" y="0" width="${workingW}" height="${workingH}" fill="#FFFFFF"/>`];
+  if (choice === "logo") {
+    const size = Math.min(workingW, workingH) * 0.35;
+    if (logoDataUrl) {
+      parts.push(`<image x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" href="${logoDataUrl}" preserveAspectRatio="xMidYMid meet"/>`);
+    } else {
+      parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="${resolveLogoColor(logoColor)}"/>`);
+    }
+  } else if (choice === "qr") {
+    const size = Math.min(workingW, workingH) * 0.4;
+    parts.push(`<rect x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" fill="#1A1A22"/>`);
+    parts.push(`<text x="${cx}" y="${cy}" font-size="4" fill="#fff" text-anchor="middle" dominant-baseline="middle">QR</text>`);
+  } else if (choice === "text" && backContent) {
+    const lines = (backContent.lines || []).filter((l) => l.trim());
+    const fontDef = resolveFontFamily(backContent.fontFamilyId);
+    const align = backContent.align || "left";
+    const marginMm = spec.safeMargin + spec.bleed;
+    const textAnchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
+    const xPos = align === "left" ? offsetX + marginMm : align === "right" ? offsetX + workingW - marginMm : cx;
+    // 폰트 크기는 줄 수에 따라 살짝 줄여서(너무 많이 넣으면 겹치는 대신 작아지게)
+    // 최소한의 안전장치를 둡니다 — 앞면처럼 정교한 겹침 방지는 아니지만, 아예 안전선을
+    // 벗어나 잘리는 것보다는 낫습니다.
+    const fontSize = lines.length <= 3 ? 5.5 : lines.length <= 6 ? 4.2 : 3.4;
+    const lineHeight = fontSize * 1.5;
+    const totalHeight = lines.length * lineHeight;
+    const startY = cy - totalHeight / 2 + fontSize;
+    lines.forEach((line, i) => {
+      const y = startY + i * lineHeight;
+      const safeLine = String(line).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      parts.push(`<text x="${xPos}" y="${y}" font-size="${fontSize}" font-family="${fontDef.family}" font-weight="${fontDef.weight}" fill="#1A1A22" text-anchor="${textAnchor}">${safeLine}</text>`);
+    });
+  }
+  // "blank"은 배경만 있는 빈 뒷면입니다.
+  return parts.join("\n");
+}
+
+// 앞면 SVG 문자열(buildCardSVG의 결과)과 뒷면 선택지를 받아, 인쇄소가 한 파일에서
+// 양면을 바로 알아볼 수 있도록 나란히 배치한 하나의 SVG로 합칩니다. 각 패널 위에
+// "앞면"/"뒷면" 표시는 실제 인쇄 영역(도련) 바깥의 여유 공간에만 넣어서, 인쇄되는
+// 카드 내용 자체에는 전혀 영향이 없습니다.
+// 2026-08-01: "가로형/세로형을 앞뒤 독립적으로 고를 수 있어야 한다"는 요청으로
+// frontSpec/backSpec을 따로 받습니다(카드 바깥 모양은 물리적으로 앞뒤가 같아야
+// 하지만 — 한 장의 카드니까 — 그 안 내용 배치는 완전히 독립적입니다. 앞뒤를 다른
+// 모양으로 고르면 그 상태 그대로 반영됩니다. 자동으로 서로 맞춰 돌리는 기능은
+// "흔치 않은 경우라 필요 없다"고 확인받아 만들지 않았습니다). 높이가 서로 다르면
+// 짧은 쪽을 세로 가운데로 맞춰서 나란히 놓습니다.
+function buildDoubleSidedSVG(frontSvgInner, backLayoutChoice, frontSpec, logoDataUrl, logoColor, backContent = null, backSpec = frontSpec) {
+  const frontW = frontSpec.trimWidth + frontSpec.bleed * 2;
+  const frontH = frontSpec.trimHeight + frontSpec.bleed * 2;
+  const backW = backSpec.trimWidth + backSpec.bleed * 2;
+  const backH = backSpec.trimHeight + backSpec.bleed * 2;
+  const gap = 10; // mm, 앞/뒤 사이 여백
+  const labelHeight = 6; // mm, 라벨용 여유
+  const totalW = frontW + gap + backW;
+  const maxPanelH = Math.max(frontH, backH);
+  const totalH = maxPanelH + labelHeight;
+  const frontOffsetY = (maxPanelH - frontH) / 2;
+  const backOffsetY = (maxPanelH - backH) / 2;
+  const backOffsetX = frontW + gap;
+  const frontInnerMatch = frontSvgInner.match(/<svg[^>]*>([\s\S]*)<\/svg>/);
+  const frontInner = frontInnerMatch ? frontInnerMatch[1] : frontSvgInner;
+
+  const parts = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}mm" height="${totalH}mm" viewBox="0 0 ${totalW} ${totalH}">`);
+  parts.push(`<text x="0" y="4" font-size="3" fill="#999">앞면 (Front)</text>`);
+  parts.push(`<text x="${backOffsetX}" y="4" font-size="3" fill="#999">뒷면 (Back)</text>`);
+  parts.push(`<g transform="translate(0, ${labelHeight + frontOffsetY})">${frontInner}</g>`);
+  parts.push(`<g transform="translate(0, ${labelHeight + backOffsetY})">${buildBackPanelSVG(backLayoutChoice, backSpec, backOffsetX, logoDataUrl, logoColor, backContent)}</g>`);
+  parts.push(`</svg>`);
+  return parts.join("\n");
+}
+
+// ==================== domain/company/logoExtraction ====================
+// ====================================================================
+// Domain : Company / Logo Extraction
+// Responsibility : 명함·안내문·간판 사진 등 "로고가 일부만 포함된 사진"에서
+//                  로고 영역만 잘라내기.
+//
+// 설계 방향(중요): 배경까지 완전히 투명하게 지우는 이미지 분할(segmentation)이
+// 아니라, "이 사진에서 로고가 대략 어디 있는지" 위치만 비전 모델에게 물어보고,
+// 그 사각형 영역만 Canvas로 자릅니다. 전용 컴퓨터 비전 엔진을 직접 만드는 것보다
+// 훨씬 간단하고, 이미 있는 비전 API(여기서는 Claude API의 이미지 입력)로 충분합니다.
+// 배경이 완전히 투명하지 않고 사각형으로만 잘리는 것은 의도된 한계입니다 —
+// 필요성이 실제로 확인되면 그때 배경 제거를 별도로 추가합니다.
+// ====================================================================
+
+// 프롬프트를 한 곳에 모아둔 객체 — recommendationEngine.js와 같은 패턴입니다.
+// 아직 이거 하나뿐이라 별도 폴더(prompt/)로는 나누지 않았습니다.
+const LOGO_EXTRACTION_PROMPTS = {
+  extractLogo: `이 사진 안에 회사 로고가 보이면, 그 로고를 감싸는 사각형 영역을
+이미지 전체 크기에 대한 백분율(0~100)로 알려줘. 다른 설명 없이 아래 JSON 형식으로만 답변해:
+{"found": true, "x": 왼쪽 끝 %, "y": 위쪽 끝 %, "width": 너비 %, "height": 높이 %}
+로고를 찾지 못하면 {"found": false} 로만 답변해.`,
+};
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]); // "data:...;base64," 접두어 제거
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// 사진 안에서 로고가 있는 대략의 위치를 비전 모델에게 물어봅니다.
+// 반환값은 이미지 크기에 대한 상대 좌표(0~100, %)입니다 — 픽셀 좌표를 바로 받으면
+// 모델이 실제 표시 크기를 몰라 부정확해지기 쉬워서, 항상 %로 답하게 합니다.
+async function detectLogoRegion(file) {
+  const base64 = await fileToBase64(file);
+  const prompt = LOGO_EXTRACTION_PROMPTS.extractLogo;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 200,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 } },
+          { type: "text", text: prompt },
+        ],
+      }],
+    }),
+  });
+  if (!response.ok) throw new Error(`로고 위치 감지 실패 (${response.status})`);
+  const data = await response.json();
+  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  if (!parsed.found) return null;
+
+  // 값 방어: 모델이 범위를 벗어난 값을 줄 수 있으니 0~100 사이로 잘라줍니다.
+  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+  return { x: clamp(parsed.x), y: clamp(parsed.y), width: clamp(parsed.width), height: clamp(parsed.height) };
+}
+
+// 원본 이미지에서 region(%) 영역만 Canvas로 잘라 새 이미지(Blob)를 만듭니다.
+function cropImageToRegion(file, region) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const sx = (region.x / 100) * img.naturalWidth;
+        const sy = (region.y / 100) * img.naturalHeight;
+        const sw = (region.width / 100) * img.naturalWidth;
+        const sh = (region.height / 100) * img.naturalHeight;
+        const canvas = document.createElement("canvas");
+        canvas.width = sw;
+        canvas.height = sh;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("자르기 실패"))), "image/png");
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => reject(new Error("이미지 로드 실패"));
+    img.src = url;
+  });
+}
+
+// 잘라낸 로고가 너무 작으면(사진을 멀리서 찍은 경우 등) 명함에 쓰기엔 화질이
+// 부족할 수 있습니다. 정교한 블러 감지 대신, 가장 흔한 문제(해상도 부족)만 우선 확인합니다.
+const MIN_LOGO_DIMENSION = 200; // px — 이보다 작으면 명함 인쇄에 부적합할 가능성이 큼
+
+function checkImageQuality(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const ok = img.naturalWidth >= MIN_LOGO_DIMENSION && img.naturalHeight >= MIN_LOGO_DIMENSION;
+      resolve({ ok, width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ ok: false, width: 0, height: 0 });
+    };
+    img.src = url;
+  });
+}
+
+// 전체 과정을 하나로 묶은 진입점. 로고를 못 찾으면 null을 반환합니다 —
+// 이 경우 호출한 쪽에서 "직접 잘라서 다시 올려주세요" 같은 안내로 이어가면 됩니다.
+async function extractLogoFromPhoto(file) {
+  const region = await detectLogoRegion(file);
+  if (!region) return null;
+  const blob = await cropImageToRegion(file, region);
+  return new File([blob], `logo_${Date.now()}.png`, { type: "image/png" });
+}
+
+// ==================== domain/asset/moodIntensity ====================
+// [Asset Domain: Catalog] ── Mood Intensity Table v1.0 ─────
+// "업종별로 배경의 존재감(강도)을 다르게 준다"는 원칙을 담은 표입니다.
+//
+// 정직하게 밝히는 것: 이 숫자들(10, 30, 35...)은 실제 명함 데이터를 분석해서 나온
+// 통계가 아닙니다 — 사장님이 업종별로 판단한 디자인 기준값입니다. DRS의 안전마진
+// (3mm)이나 최소 폰트 크기와 같은 종류입니다: 사람이 정한 설계값이지 측정값이
+// 아닙니다. 나중에 Learning Domain이 실사용 데이터를 충분히 모으면, 이 값들을
+// 실제 데이터 기반 값으로 검증하거나 대체할 수 있습니다 — 그 전까지는 이게
+// "합리적인 기본값" 역할을 합니다.
+//
+// intensity는 0~100 사이 값으로, "배경 이미지가 카드에서 얼마나 존재감 있게
+// 보여야 하는가"를 뜻합니다. 낮을수록 거의 흰 배경에 가깝고(신뢰감 우선),
+// 높을수록 배경이 분위기를 적극적으로 표현합니다(개성·정서 우선).
+//
+// industryDetector.js가 실제로 인식하는 9개 업종(INDUSTRY_KEYWORDS)에 맞춰
+// 만들었습니다 — "음식점", "꽃집"처럼 아직 인식 목록에 없는 업종은 넣지 않았습니다
+// (실제로 감지도 안 되는 업종에 값만 미리 만들어두는 건 "없는 걸 있는 것처럼"
+// 다루는 것과 비슷한 문제라서요). industryDetector.js에 새 업종이 추가되면 이
+// 표에도 같이 추가해야 합니다 — frameCodes.js의 INDUSTRY_PREFIXES와 같은 원칙.
+const MOOD_INTENSITY_BY_INDUSTRY = {
+  "보험": 10,
+  "의료": 10,
+  "법률": 8,
+  "부동산": 15,
+  "교육": 15,
+  "카페": 30,
+  "베이커리": 25,
+  "미용업": 35,
+  "스튜디오": 30,
+};
+const MOOD_INTENSITY_DEFAULT = 15; // 업종 미감지 시 — 부동산/교육과 같은 중간값으로 보수적으로 시작
+
+function getMoodIntensity(industry) {
+  return MOOD_INTENSITY_BY_INDUSTRY[industry] ?? MOOD_INTENSITY_DEFAULT;
+}
+
+// ==================== domain/generative/backgroundEngine ====================
+// ====================================================================
+// Domain : Generative / Background Engine
+// Version : 0.1 (뼈대만 — 실제 이미지 생성 API 없이는 완성될 수 없음)
+// Responsibility : 업종·스타일 태그·색상·분위기 강도를 받아 배경 이미지 생성
+//                  프롬프트를 조립하고, 결과를 업종 단위로 캐싱합니다.
+// 2026-08-04: 캐시 저장을 shared:true → shared:false로 바꿨습니다 — 이 캐시는 다른
+// 사용자와 공유될 이유가 딱히 없었고(업종별 캐시라 공유되면 오히려 다른 회사
+// 결과가 섞여 보일 수 있었음), Claude 아티팩트의 "공유 데이터 접근" 권한 팝업이
+// 뜨는 원인 중 하나였습니다. 개인 저장(shared:false)으로도 캐싱 목적은 그대로
+// 달성되고, 팝업도 안 뜹니다.
+//
+// 정직하게 밝히는 한계: callImageGenerationApi()는 실제로 이미지를 생성하지
+// 않습니다. 이 프로젝트에는 텍스트 완성(getStyleSuggestion)과 비전 분석
+// (extractLogoFromPhoto) API 호출은 있지만, 이미지를 생성하는 API 호출은
+// 아직 하나도 없습니다 — Claude API 자체가 이미지를 생성하지 않고, DALL-E나
+// Stable Diffusion, Imagen 같은 별도 서비스와 API 키가 필요합니다. 그 키는
+// 사장님이 해당 서비스에 가입해서 직접 발급받아야 하는 값이라 여기서 대신
+// 채워둘 수 없습니다. 아래 함수는 그 키가 준비됐을 때 내부 구현만 바꾸면
+// 나머지(프롬프트 조립·캐싱·호출 시점)는 전부 그대로 쓸 수 있도록 만든
+// 자리입니다 — 지금 호출하면 항상 { available: false }를 반환합니다.
+// ====================================================================
+
+
+
+// 업종+태그+색상 → 실제 이미지 생성 서비스에 보낼 프롬프트 문자열.
+// intensity(강도)는 숫자를 그대로 프롬프트에 노출하기보다("15% 존재감을 그려줘"는
+// 이미지 생성 모델이 이해하기 어려운 지시라서), "은은하게/적당히/뚜렷하게" 같은
+// 정성적 표현으로 변환해서 넣습니다.
+function intensityToDescriptor(intensity) {
+  if (intensity <= 12) return "매우 은은하고 거의 안 보일 정도로 절제된";
+  if (intensity <= 22) return "은은한";
+  if (intensity <= 32) return "적당히 느껴지는";
+  return "뚜렷하고 분위기가 살아있는";
+}
+
+function buildBackgroundPrompt(industry, styleTags = [], colorLabel = null) {
+  const intensity = getMoodIntensity(industry);
+  const descriptor = intensityToDescriptor(intensity);
+  const tagsPart = styleTags.length ? styleTags.join(", ") : "전문적이고 신뢰감 있는";
+  const colorPart = colorLabel ? `주요 색상은 ${colorLabel} 계열로,` : "";
+  return `명함 배경 이미지를 만들어줘. 업종은 "${industry || "일반"}"이고, ${colorPart} ${descriptor} 정도의 텍스처/일러스트를 써줘.
+분위기 키워드: ${tagsPart}.
+중요: 텍스트를 얹을 자리이므로 중앙과 하단 영역은 비교적 단순하게 비워두고, 명함 규격(90x50mm, 가로형)에 맞는 여백 있는 구성으로 만들어줘.
+장식이 과하지 않게, "특이하다"보다 "깔끔하고 전문적이다"는 인상을 우선해줘.`;
+}
+
+// 실제 이미지 생성 API 호출 자리. 지금은 항상 이용 불가로 답합니다 — 가짜 이미지나
+// 플레이스홀더 URL을 만들어 반환하지 않습니다(그렇게 하면 "작동하는 것처럼" 보이는
+// 화면을 만들게 되어, 오늘 계속 경계해온 "없는 걸 있는 것처럼" 문제가 됩니다).
+// 2026-08-08: 실제로 연결됐습니다 — Render 서버(routes/backgroundGen.js)를 거쳐
+// Replicate의 Flux Schnell 모델을 부릅니다. ⚠️ 비용이 실제로 발생하는 호출입니다
+// (장당 약 1~4원, 2026-08 기준) — 호출 빈도 제한(예: 디자인당 재생성 몇 회까지)은
+// 아직 프론트엔드에 없습니다. 실제로 이 기능을 디자인 화면에 노출하기 전에
+// 반드시 재생성 횟수 제한을 추가해서 비용이 예측 불가능해지는 것을 막아야 합니다.
+async function callImageGenerationApi(prompt, widthMm = 90, heightMm = 50) {
+  try {
+    const res = await fetch(`${RENDER_API_BASE}/api/generate-background`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, widthMm, heightMm }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      console.error("배경 생성 실패:", body.error);
+      return { available: false, images: [] };
+    }
+    const body = await res.json();
+    return { available: true, images: body.images || [] };
+  } catch (err) {
+    console.error("배경 생성 요청 중 예외:", err.message);
+    return { available: false, images: [] };
+  }
+}
+
+// 업종+스타일 태그+색상 조합 단위로 캐싱합니다 — getStyleSuggestion과 같은 패턴
+// (같은 조합이면 여러 사용자가 재사용, API 호출·비용을 아낌). 캐시 키에 회사명이나
+// 개인정보는 포함하지 않습니다.
+async function generateBackgroundOptions(industry, styleTags = [], colorId = null, widthMm = 90, heightMm = 50) {
+  const cacheKey = `bg:${industry || "GEN"}:${[...styleTags].sort().join(",")}:${colorId || "any"}:${widthMm}x${heightMm}`;
+  try {
+    const cached = await window.storage.get(cacheKey, false);
+    if (cached?.value) return JSON.parse(cached.value);
+  } catch {
+    // 캐시에 없으면 아래에서 생성 시도로 이어짐
+  }
+
+  const prompt = buildBackgroundPrompt(industry, styleTags, colorId);
+  const result = await callImageGenerationApi(prompt, widthMm, heightMm);
+  const response = { ...result, prompt, industry };
+
+  if (result.available) {
+    try {
+      await window.storage.set(cacheKey, JSON.stringify(response), false);
+    } catch {
+      // 저장 실패해도 이번 결과는 그대로 반환
+    }
+  }
+  return response;
+}
+
 // ==================== domain/recommendation/index ====================
 // Recommendation Domain — "AI가 어떻게 생각하는가". 재료(Asset)와 규칙(Kernel)을
 // 조합해서 실제로 무엇을 추천할지 계산합니다. CP-002(제안): AI는 추천할 뿐 결정하지
@@ -3420,355 +4077,6 @@ function CardLayoutPreview({ templateName, photoVariant, photoFile, showLogo = t
 //   Phase 2 [ ] recommendationRules.js   — "업종 X면 색상 Y" 같은 명시적 규칙표가 필요해지면
 //   Phase 3 [ ] recommendationScore.js   — 여러 후보를 동시에 점수 매겨 비교해야 할 때,
 //                                          또는 STEP 7 Learning이 붙어 통계 기반 점수가 생길 때
-
-// ==================== domain/company/companyResolver ====================
-// ====================================================================
-// Domain : Company
-// Version : Phase 1
-// Responsibility : 상호명 문자열 → 회사 식별(별칭 보정 포함) → 회사 정보 반환.
-//                  지금은 이 책임 하나뿐이라 파일도 하나(companyResolver.js)입니다.
-//
-// Company Domain Roadmap ("실제 책임이 생길 때 분리한다" 원칙)
-//   Phase 1 [x] companyResolver.js   — 상호명 → 회사 식별 + 등록 정책(registerCompany, dedup)
-//   Phase 2 [ ] companyAsset.js      — 로고 파일이 실제 Storage(Firebase Storage 등)로 옮겨가면: getLogo(), getBrandColor(), getGuideline()
-//   Phase 3 [ ] companySearch.js     — 등록 회사가 수천~수만 개로 늘어나면: searchCompany(), fuzzySearch()
-//   Phase 4 [ ] companyAlias.js      — "삼성/삼성전자/삼성전자판매/삼성전자서비스"처럼 별칭이 복잡해지면 별도 분리
-//   Phase 5 [ ] companyProfile.js    — companyName/industry/size/preferredFrame·Color·Typography
-//   Phase 6 [ ] companyGuideline.js  — minimumLogoSize/clearSpace/logoPosition/backgroundRule
-//   Phase 7 [ ] companyLearning.js   — "이 회사 사람들이 실제로 어떤 디자인을 많이 선택했는가"
-//                                       (Learning Domain의 STEP 7과 연결. 단, 실명 회사 디자인을
-//                                       복제하는 방향이 아니라 계약된 회사의 공식 가이드 또는 우리
-//                                       서비스 안에서 축적된 실제 선택 데이터 기반으로만 발전시킨다.)
-//
-// 아직 만들지 않은 것 (둘 다 별도 UI/승인 흐름이 필요해 범위가 큼 — registerCompany()라는
-// "창구"만 먼저 만들고, 그 창구를 실제로 호출하는 화면은 다음 단계):
-//   - 계약회원이 디자인 완료 시 "이 로고를 등록할까요?" 묻는 훅
-//   - 사원증·재직증명서 업로드 인증 경로 (관리자 검토 대기열 포함) — emailDomains를
-//     모르는 회사(위 한계 참고)의 재직 확인은 이 경로가 있어야 가능해짐
-// 지금 Phase 2~7을 미리 빈 파일로 만들지 않는 이유: 실제 책임이 없는 상태에서
-// 파일부터 나누면 대부분 빈 껍데기가 되고, 오히려 어디에 뭘 넣을지 헷갈리게 됩니다.
-// ====================================================================
-// Company Resolution Engine (STEP 0 — Design Engine보다 앞단)
-// ----------------------------------------------------------------------
-// 배경: 일반회원이 회사 로고 파일 없이 첫 명함을 만들 때, AI가 "비슷한"
-// 패턴을 대신 만들어주면 실제 회사 로고와 달라 신뢰 문제가 생김
-// (95% 일치는 "틀렸다"고 인식됨 — 100%가 필요). 그래서 로고는 디자인
-// 엔진의 "표현(Expression)" 영역이 아니라 "정확성(Accuracy)" 영역으로
-// 분리해서, Design Engine이 시작되기 전에 여기서 먼저 확보한다.
-//
-// 상표권 주의: 재직 중인 직원 본인이 자기 명함에 소속 회사 로고를
-// 쓰는 것은 정당한 사용이지만, 소속이 아닌 사람이 임의로 쓰면 문제가
-// 될 수 있음. 그래서 라이브러리 매칭 + 회사 이메일 도메인 인증을
-// 통과해야만 공식 로고를 자동 적용한다. (Issue Registry BC-014/BC-018, ADR-007/008)
-// ====================================================================
-// 회사명 비교용 정규화. 공백/기호 제거에 더해, "주식회사"/"(주)"/"㈜"/Inc./Corp. 같은
-// 법인격 표기도 지워서 "삼성전자㈜"와 "삼성전자 주식회사"가 같은 회사로 매칭되게 합니다.
-// 법인격 표기 사전 — 정규식을 계속 늘리는 대신 배열로 관리해서, 새 표기를
-// 발견할 때마다 정규식을 다시 안 짜고 항목만 추가하면 되게 했습니다.
-// 2026-08-04: 실제 서버(Render+Supabase)가 배포되면서, 아래 persistCompany/
-// loadCompanyLibrary/removeCompany가 window.storage 대신 이 서버를 부르도록
-// 바뀌었습니다. resolveCompany·registerCompany의 매칭/중복확인 로직 자체는
-// 전혀 안 바뀌었습니다 — "저장을 어디에 하는가"만 바뀐 것입니다.
-
-const CORPORATE_SUFFIXES = [
-  "주식회사", "(주)", "㈜",
-  "Co., Ltd.", "Co. Ltd.", "Co Ltd", "Co.,Ltd", "Co.",
-  "Corporation", "Corp.", "Corp",
-  "Inc.", "Inc",
-  "Ltd.", "Ltd",
-  "Company",
-];
-
-// 회사명 비교용 정규화. 위 법인격 표기를 전부 지우고(어느 위치에 있든), 공백/기호를
-// 없애서 "삼성전자㈜"와 "삼성전자 주식회사", "Samsung Electronics Co., Ltd."가
-// 전부 같은 회사로 매칭되게 합니다.
-function normalizeCompanyName(str) {
-  let result = str || "";
-  for (const suffix of CORPORATE_SUFFIXES) {
-    result = result.replace(new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
-  }
-  return result.replace(/[\s\-_.,()]/g, "").toLowerCase();
-}
-
-// ====================================================================
-// Company Logo Library — 등록 경로는 여러 개, 저장소는 하나.
-// ----------------------------------------------------------------------
-// 등록 경로(source)는 4가지가 있을 수 있습니다:
-//   "official"          — 잘 알려진 대기업, 관리자가 미리 등록 (지금 여기 있는 삼성화재/현대해상)
-//   "contract_upload"   — 계약회원이 디자인하다가 등록한 회사(잘 안 알려진 회사 위주)
-//   "admin_registered"  — 관리자가 직접 추가
-//   "user_uploaded"     — 일반회원이 올린 로고를 관리자 승인 후 라이브러리에 편입
-// 등록 경로와 무관하게, 한 번 라이브러리에 들어오면 resolveCompany()로 똑같이 조회되고,
-// 로고 사용 전 인증도 (verifyCompanyEmail 등으로) 똑같이 거칩니다 — source가 다르다고
-// 검증 없이 통과되는 경로는 없습니다.
-//
-// 등록 정책: "저장목록에 없을 경우에만 저장한다" — registerCompany()가 이 규칙을 강제합니다.
-// 이미 있는 회사(대기업 등)를 계약회원이 또 올려도 중복 저장되지 않습니다.
-//
-// 한계(정직하게): emailDomains를 모르는 회사(계약회원이 올린 소규모 업체 등)는 지금
-// verifyCompanyEmail()로 인증할 방법이 없습니다 — 회사 이메일 도메인을 모르기 때문입니다.
-// 이런 경우의 인증(사원증/재직증명서 업로드 등)은 아직 별도로 구현되지 않았습니다.
-// ====================================================================
-// TODO: 실제 서비스에서는 이 배열이 아니라 진짜 DB(Firestore 등)를 써야 합니다.
-// 지금은 프로토타입이라 모듈 로드 시점의 메모리 배열이라, 새로고침하면 registerCompany()로
-// 추가한 항목은 사라집니다 — 그래도 "등록 정책(dedup 로직)"은 이미 실제로 동작합니다.
-// logoType: 이 로고를 쓰는 조직의 성격. 회사(corporate)뿐 아니라 학교·병원·관공서·
-// 협회·군부대·종교단체도 언젠가 지원할 걸 감안해 처음부터 넣어둡니다.
-const COMPANY_LOGO_TYPES = {
-  CORPORATE: "corporate",
-  GOVERNMENT: "government",
-  SCHOOL: "school",
-  HOSPITAL: "hospital",
-  ASSOCIATION: "association",
-  MILITARY: "military",
-  RELIGION: "religion",
-  ETC: "etc",
-};
-
-const COMPANY_DOMAIN = [
-  {
-    id: "samsung_fire", name: "삼성화재",
-    aliases: ["삼성화재", "삼성화재해상보험", "삼성 화재"],
-    logo: "/logos/insurance/samsung_fire.svg", brandColor: "#0f2b6c", industry: "보험",
-    logoType: COMPANY_LOGO_TYPES.CORPORATE, homepage: "samsungfire.com", officialLogoUrl: null, logoVersion: "1.0", imageHash: null,
-    emailDomains: ["samsungfire.com"],
-    source: "official", status: "official", qualityGrade: "A", lastUpdated: null,
-  },
-  {
-    id: "hyundai_marine", name: "현대해상",
-    aliases: ["현대해상", "현대해상화재보험"],
-    logo: "/logos/insurance/hyundai_marine.svg", brandColor: "#004b93", industry: "보험",
-    logoType: COMPANY_LOGO_TYPES.CORPORATE, homepage: "hi.co.kr", officialLogoUrl: null, logoVersion: "1.0", imageHash: null,
-    emailDomains: ["hi.co.kr"],
-    source: "official", status: "official", qualityGrade: "A", lastUpdated: null,
-  },
-];
-
-// 정확 일치 → alias 정확 일치 → 정규화 후 부분 일치(오타·띄어쓰기 흡수) 순.
-function resolveCompany(inputName) {
-  const trimmed = (inputName || "").trim();
-  if (!trimmed) return null;
-  const n = normalizeCompanyName(trimmed);
-  return (
-    COMPANY_DOMAIN.find((c) => c.name === trimmed) ||
-    COMPANY_DOMAIN.find((c) => c.aliases.some((a) => normalizeCompanyName(a) === n)) ||
-    COMPANY_DOMAIN.find((c) =>
-      c.aliases.some((a) => {
-        const na = normalizeCompanyName(a);
-        return na.includes(n) || n.includes(na);
-      })
-    ) ||
-    null
-  );
-}
-
-// source별 기본 status. "official"/"admin_registered"는 이미 관리자가 확인한 셈이라
-// 바로 신뢰하고, "contract_upload"/"user_uploaded"는 아직 아무도 확인 전이라 검토 대기.
-// naver.com/gmail.com 같은 무료 개인 이메일 도메인은 "특정 회사가 소유한 도메인"이
-// 아니라 누구나 계정을 만들 수 있는 공개 서비스입니다. 이런 도메인을 emailDomains에
-// 등록해두면 "그 메일 서비스에 계정만 있으면 이 회사로 인증된다"는 뜻이 되어버려서,
-// 회사 도메인 검증이라는 목적 자체가 무너집니다(실제로 명함 사진을 보고 발견한 문제 —
-// 도메인 메일이 없는 중소기업·1인기업이 실제로 아주 많습니다). 그래서 이런 도메인은
-// 절대 emailDomains에 등록되지 않도록 여기서 걸러냅니다.
-const FREE_EMAIL_DOMAINS = [
-  "gmail.com", "naver.com", "daum.net", "hanmail.net", "kakao.com",
-  "outlook.com", "hotmail.com", "yahoo.com", "nate.com", "icloud.com", "live.com",
-];
-function isPersonalEmailDomain(domain) {
-  return FREE_EMAIL_DOMAINS.includes((domain || "").toLowerCase().trim());
-}
-
-const DEFAULT_STATUS_BY_SOURCE = {
-  official: "official",
-  admin_registered: "verified",
-  contract_upload: "pending",
-  ai_extracted: "pending",
-  user_uploaded: "pending",
-};
-
-// 로고 품질 등급 — status(신뢰 검증 여부)와는 다른 축입니다. status는 "관리자가
-// 확인했는가", qualityGrade는 "출처를 감안했을 때 이미지 자체의 품질을 얼마나
-// 믿을 수 있는가"입니다. 회사 검색 시 A부터 순서대로 우선 사용합니다.
-//   A: 공식 파일(회사가 직접 제공/관리자 등록) — 항상 우선 사용
-//   B: 홈페이지 등에서 확보한 것으로 추정(계약회원이 전문적으로 확보) — A 없을 때 사용
-//   C: AI가 사진에서 추출 — 임시 사용, 관리자 검토 대상
-//   D: 사용자가 그대로 업로드(추출·가공 없음) — 검증 전까지 개인 명함에만 사용
-const DEFAULT_GRADE_BY_SOURCE = {
-  official: "A",
-  admin_registered: "B",
-  contract_upload: "B",
-  ai_extracted: "C",
-  user_uploaded: "D",
-};
-
-// ====================================================================
-// 영속 저장 — 2026-08-04부터 실제 서버(Render) → Supabase에 저장됩니다.
-// COMPANY_DOMAIN 배열 자체는 여전히 메모리에만 있어서, 앱이 켜질 때마다
-// loadCompanyLibrary()로 서버에서 다시 불러와야 이전에 등록된 회사들이 보입니다.
-// ====================================================================
-async function persistCompany(company) {
-  try {
-    const res = await fetch(`${RENDER_API_BASE}/api/companies`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ company }),
-    });
-    if (!res.ok) throw new Error(`저장 요청 실패 (${res.status})`);
-  } catch (err) {
-    console.error("회사 라이브러리 저장 실패:", err);
-    // 저장에 실패해도 이번 세션 안에서는 COMPANY_DOMAIN에 이미 들어가 있어 계속 쓸 수 있음
-  }
-}
-
-// 앱 시작 시 한 번 호출 — 서버에 저장된 회사들을 COMPANY_DOMAIN에 합칩니다.
-async function loadCompanyLibrary() {
-  try {
-    const res = await fetch(`${RENDER_API_BASE}/api/companies`);
-    if (!res.ok) throw new Error(`목록 조회 실패 (${res.status})`);
-    const body = await res.json();
-    for (const company of body.companies || []) {
-      if (!company?.id) continue;
-      if (COMPANY_DOMAIN.some((c) => c.id === company.id)) continue; // 이미 있으면 건너뜀(official 시드 데이터 등)
-      COMPANY_DOMAIN.push(company);
-    }
-  } catch (err) {
-    console.error("회사 라이브러리 불러오기 실패:", err);
-  }
-}
-
-// "저장목록에 없을 경우에만 저장한다" 정책을 강제하는 단일 등록 창구.
-// 이미 같은 회사가 있으면(별칭·부분일치 포함) 새로 추가하지 않고 기존 항목을 그대로 반환합니다.
-// entry: { name, aliases?, logo, brandColor?, emailDomains?, source, status? }
-// data URL(base64) 로고 이미지의 SHA-256 해시. 이름이 "삼성전자"/"Samsung Electronics"/
-// "삼성전자(주)"처럼 제각각이어도, 같은 이미지 파일이면 해시가 같아서 같은 로고임을
-// 알 수 있습니다. 경로 문자열(공식 시드 데이터의 /logos/...)은 실제 이미지 바이트가
-// 없어 해시할 수 없으므로 null을 반환합니다.
-async function computeImageHash(logo) {
-  if (!logo || !logo.startsWith("data:")) return null;
-  try {
-    const base64 = logo.split(",")[1];
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  } catch {
-    return null; // 해시 실패해도 등록 자체는 막지 않음 — 이름 기반 중복 체크는 계속 동작
-  }
-}
-
-async function registerCompany(entry) {
-  const existing = resolveCompany(entry.name);
-  if (existing) return { registered: false, company: existing };
-
-  const imageHash = await computeImageHash(entry.logo);
-  if (imageHash) {
-    // 이름은 다르지만 이미지가 완전히 같은 로고가 이미 있으면, 새 항목을 또 만들지 않고
-    // 그 항목에 이번 이름을 별칭으로 추가합니다 (예: "삼성전자"로 이미 등록된 로고를
-    // 다른 사용자가 "Samsung Electronics"로 다시 올린 경우).
-    const sameImage = COMPANY_DOMAIN.find((c) => c.imageHash === imageHash);
-    if (sameImage) {
-      if (!sameImage.aliases.includes(entry.name)) {
-        sameImage.aliases.push(entry.name);
-        await persistCompany(sameImage);
-      }
-      return { registered: false, company: sameImage, mergedAlias: true };
-    }
-  }
-
-  const id = normalizeCompanyName(entry.name) || `company_${COMPANY_DOMAIN.length + 1}`;
-  const safeEmailDomains = (entry.emailDomains || []).filter((d) => {
-    if (isPersonalEmailDomain(d)) {
-      // eslint-disable-next-line no-console
-      console.warn(`[companyResolver] "${d}"는 개인 이메일 도메인이라 ${entry.name}의 emailDomains에 등록하지 않습니다.`);
-      return false;
-    }
-    return true;
-  });
-  const company = {
-    id,
-    name: entry.name,
-    aliases: entry.aliases?.length ? entry.aliases : [entry.name],
-    logo: entry.logo,
-    // brandColor가 이미 "이 로고의 대표 색상"(dominantColor) 역할을 하고 있어서
-    // 별도 필드로 중복 만들지 않았습니다 — 이름만 다를 뿐 같은 개념입니다.
-    brandColor: entry.brandColor || null,
-    industry: entry.industry || null, // industryDetector가 이미 추정한 값이 있으면 넘겨받아 저장 — 다음부터는 재추정 불필요
-    logoType: entry.logoType || COMPANY_LOGO_TYPES.CORPORATE,
-    homepage: entry.homepage || null, // AI가 로고를 "다시 확인하러" 갈 참고용 링크
-    officialLogoUrl: entry.officialLogoUrl || null, // 관리자가 실제로 확인한 로고 원본 위치(재검증용) — homepage와 다른 개념
-    logoVersion: entry.logoVersion || "1.0",
-    imageHash,
-    emailDomains: safeEmailDomains, // 모르면(또는 전부 개인 도메인이라 걸러지면) 빈 배열 — 이 경우 이메일 인증은 통과할 수 없음(위 한계 참고)
-    source: entry.source,
-    status: entry.status || DEFAULT_STATUS_BY_SOURCE[entry.source] || "pending",
-    qualityGrade: entry.qualityGrade || DEFAULT_GRADE_BY_SOURCE[entry.source] || "D",
-    lastUpdated: Date.now(),
-    // vector(로고 벡터화)는 아직 없습니다 — 실제로 인쇄 확대 시 화질 문제가
-    // 확인되면 그때 벡터화 파이프라인을 별도로 추가합니다 (지금은 PNG만 다룸).
-  };
-  COMPANY_DOMAIN.push(company); // 이번 세션에서는 즉시 사용 가능
-  await persistCompany(company); // 다음 세션에서도 쓰려면 저장까지 기다려야 함
-  return { registered: true, company };
-}
-
-// 관리자가 검토를 마쳤을 때 status를 바꾸는 용도 (예: "pending" → "verified"/"rejected").
-// 실제 서비스에서는 관리자 전용 화면·권한 확인이 앞단에 있어야 합니다 — 여기는 상태 변경
-// 자체만 담당합니다.
-// approvedBy/approvedAt: 승인한 사람과 시점만 남깁니다. 처음엔 "어떤 서류로 확인했는지"까지
-// 체크리스트로 받으려고 했었는데, 실제 위험 수준(검색으로 확인한 결과 중소기업 로고 사칭의
-// 실제 사례는 못 찾음, 확인된 것도 전부 도메인 인증이 이미 되는 큰 조직 사칭)에 비해 관리자
-// 승인 과정에 매번 서류 종류를 고르게 하는 건 불필요한 마찰이라고 판단해 뺐습니다 — 승인
-// 여부와 시점만 남아도 "누가 언제 확인했다"는 최소한의 기록으로는 충분합니다.
-async function updateCompanyStatus(companyId, newStatus, approval = null) {
-  const company = COMPANY_DOMAIN.find((c) => c.id === companyId);
-  if (!company) return null;
-  company.status = newStatus;
-  company.lastUpdated = Date.now();
-  if (newStatus === "verified" && approval) {
-    company.approvedBy = approval.approvedBy || "admin";
-    company.approvedAt = Date.now();
-  }
-  if (company.source !== "official") {
-    // 2026-08-04: 승인은 관리자만 할 수 있는 동작이라 서버가 로그인 토큰을 확인합니다 —
-    // Admin.jsx가 로그인 시 받아둔 토큰을 approval.token으로 같이 넘겨줘야 합니다.
-    try {
-      const res = await fetch(`${RENDER_API_BASE}/api/companies/admin/${companyId}/approve`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${approval?.token || ""}` },
-      });
-      if (!res.ok) throw new Error(`승인 요청 실패 (${res.status})`);
-    } catch (err) {
-      console.error("회사 승인 저장 실패:", err);
-    }
-  }
-  return company;
-}
-
-// 관리자가 pending 항목을 반려할 때 사용 — 완전히 삭제합니다(반려된 로고를 다시
-// 못 쓰게 하려면 상태만 바꾸는 것보다 아예 없애는 게 안전합니다 — resolveCompany()가
-// status를 보지 않고 이름만으로 찾기 때문에, 목록에 남아있으면 다시 쓰일 수 있습니다).
-async function removeCompany(companyId, token) {
-  const idx = COMPANY_DOMAIN.findIndex((c) => c.id === companyId);
-  if (idx === -1) return false;
-  COMPANY_DOMAIN.splice(idx, 1);
-  try {
-    const res = await fetch(`${RENDER_API_BASE}/api/companies/admin/${companyId}/reject`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token || ""}` },
-    });
-    if (!res.ok) throw new Error(`반려 요청 실패 (${res.status})`);
-  } catch (err) {
-    console.error("회사 라이브러리 삭제 실패:", err);
-  }
-  return true;
-}
-
-// 회사 이메일 도메인 일치 여부만 확인하는 경량 검증 (서류 대조 아님).
-function verifyCompanyEmail(email, company) {
-  if (!company || !email || !email.includes("@")) return false;
-  const domain = email.split("@")[1]?.toLowerCase().trim();
-  if (!domain || isPersonalEmailDomain(domain)) return false; // 개인 이메일 도메인은 여기서도 한 번 더 막습니다(시드 데이터 실수 대비 이중 방어)
-  return company.emailDomains.includes(domain);
-}
 
 // ==================== screens/Design ====================
 // Asset Domain(로고/색상/배경/스타일 태그 카탈로그)은 /domain/asset 로 분리됨 — "AI가 무엇을 고를 수 있는가"
@@ -5794,774 +6102,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
 
 // UploadBox, MAX_UPLOAD_MB: components/ui.js 로 이동 (Admin 화면에서도 공용으로 씀)
 
-// ==================== screens/Inquiry ====================
-// 주문별 1:1 문의(수정요청) 스레드 저장.
-// 스타일 캐시와 달리 이건 개인 요청 내용이라 shared:false(본인만 보는 저장소)를 씁니다.
-// 실제 서비스에서는 고객·관리자가 서로 다른 사람이라 이렇게 하면 관리자가 못 보게 되므로,
-// 반드시 진짜 백엔드(고객 계정 ↔ 관리자 계정이 같은 스레드를 보는 구조)로 옮겨야 합니다.
-// 지금은 프로토타입이라 "관리자 답변"도 같은 사용자가 미리보기 버튼으로 흉내냅니다.
-async function loadInquiryThread(orderNo) {
-  try {
-    const res = await window.storage.get(`inquiry:${orderNo}`, false);
-    return res?.value ? JSON.parse(res.value) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveInquiryThread(orderNo, messages) {
-  try {
-    await window.storage.set(`inquiry:${orderNo}`, JSON.stringify(messages), false);
-  } catch {
-    // 저장 실패해도 화면에는 이미 반영돼 있으므로 조용히 무시
-  }
-}
-
-function Inquiry({ order, go, back }) {
-  const orderNo = order.orderNo || "BC24110032"; // 실제 주문이 없을 때(데모 조회)는 예시 주문번호 사용
-  const [messages, setMessages] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef = React.useRef(null);
-
-  React.useEffect(() => {
-    let active = true;
-    loadInquiryThread(orderNo).then((msgs) => {
-      if (active) { setMessages(msgs); setLoaded(true); }
-    });
-    return () => { active = false; };
-  }, [orderNo]);
-
-  React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const appendMessage = async (sender, content) => {
-    const next = [...messages, { sender, text: content, at: Date.now() }];
-    setMessages(next);
-    await saveInquiryThread(orderNo, next);
-  };
-
-  const handleSend = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    setText("");
-    await appendMessage("customer", trimmed);
-    setSending(false);
-  };
-
-  const handlePreviewAdminReply = async () => {
-    await appendMessage("admin", TEXTS.inquiryDemoAdminReply);
-  };
-
-  return (
-    <div className="app-body" style={{ display: "flex", flexDirection: "column" }}>
-      <TopBar title={TEXTS.inquiryTitle} sub={`${TEXTS.inquiryOrderNoPrefix} ${orderNo}`} onBack={back} go={go} />
-
-      <div style={{ padding: "6px 18px 4px" }}>
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10 }}>{TEXTS.inquiryPrivacyNote}</div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {loaded && messages.length === 0 && (
-          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", padding: "24px 10px" }}>{TEXTS.inquiryEmpty}</div>
-        )}
-        {messages.map((m, i) => {
-          const isCustomer = m.sender === "customer";
-          return (
-            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCustomer ? "flex-end" : "flex-start" }}>
-              <div style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 3, padding: "0 4px" }}>
-                {isCustomer ? TEXTS.inquiryCustomerLabel : TEXTS.inquiryAdminLabel}
-              </div>
-              <div style={{
-                maxWidth: "78%", padding: "10px 13px", borderRadius: 14,
-                borderBottomRightRadius: isCustomer ? 4 : 14,
-                borderBottomLeftRadius: isCustomer ? 14 : 4,
-                background: isCustomer ? "var(--stamp)" : "var(--paper-white)",
-                color: isCustomer ? "#fff" : "var(--ink)",
-                border: isCustomer ? "none" : "1.5px solid var(--line)",
-                fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
-              }}>
-                {m.text}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-
-      <div style={{ padding: "12px 18px 6px" }}>
-        <div style={{ fontSize: 10, color: "var(--ink-soft)", textAlign: "center", marginBottom: 6 }}>{TEXTS.inquiryPreviewNote}</div>
-        <button
-          onClick={handlePreviewAdminReply}
-          style={{
-            width: "100%", background: "var(--paper-deep)", border: "none", color: "var(--stamp)",
-            borderRadius: 10, fontSize: 12, fontWeight: 700, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
-          }}
-        >
-          {TEXTS.inquiryPreviewReplyBtn}
-        </button>
-      </div>
-
-      <div style={{ padding: "0 18px 18px", display: "flex", gap: 8 }}>
-        <input
-          style={{ ...inputStyle, flex: 1 }}
-          placeholder={TEXTS.inquiryPlaceholder}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!text.trim() || sending}
-          style={{
-            width: 64, borderRadius: 10, border: "none",
-            background: text.trim() ? "var(--stamp)" : "var(--line)",
-            color: text.trim() ? "#fff" : "var(--ink-soft)",
-            fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", fontFamily: "inherit",
-          }}
-        >
-          {TEXTS.inquirySendBtn}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== domain/content/bannerText ====================
-// ====================================================================
-// Domain : Content
-// Responsibility : 관리자가 자주 바꾸는 홈 화면 배너/마케팅 문구를 코드 수정 없이
-//                   바꿀 수 있게 하는 작은 오버레이 계층.
-//
-// 2026-08-11: "관리자가 텍스트를 바꿀 수 있게 해달라"는 요청 반영. 앱 전체 문구
-// (constants/texts.js의 TEXTS, 수백 개)를 전부 편집 가능하게 만들면 화면마다 다
-// 손대야 해서 범위가 너무 큽니다 — "자주 바뀌는 것만"으로 좁혀서, 홈 화면 상단
-// 배너에 쓰이는 문구 6개만 우선 대상으로 했습니다. 회사 로고와 똑같은 패턴
-// (companyResolver.js의 persistCompany/loadCompanyLibrary 참고)을 그대로 따라
-// RENDER_API_BASE 서버에 저장·조회합니다.
-//
-// 서버 쪽(bizcard-studio-server) routes/bannerText.js에 GET/POST /api/banner-text
-// 엔드포인트를 추가했고 server.js에도 연결해뒀습니다 — Supabase에 banner_text
-// 테이블(key/value)만 만들어주면 바로 동작합니다(테이블 SQL은 routes/bannerText.js
-// 상단 주석 참고).
-// ====================================================================
-
-
-// 편집 가능한 문구 목록 — Admin 화면이 이 목록을 그대로 폼으로 그립니다.
-// key는 constants/texts.js의 TEXTS 키와 반드시 일치해야, 기본값(defaultValue)이 정확합니다.
-const EDITABLE_BANNER_KEYS = [
-  { key: "appTagline", label: "앱 태그라인", defaultValue: TEXTS.appTagline },
-  { key: "homeBannerLabel", label: "배너 상단 라벨", defaultValue: TEXTS.homeBannerLabel },
-  { key: "homeBannerTitle", label: "배너 제목", defaultValue: TEXTS.homeBannerTitle },
-  { key: "homeBannerCta", label: "배너 버튼 문구", defaultValue: TEXTS.homeBannerCta },
-  { key: "homePerkLogoFree", label: "혜택 안내 1", defaultValue: TEXTS.homePerkLogoFree },
-  { key: "homePerkBackgroundFree", label: "혜택 안내 2", defaultValue: TEXTS.homePerkBackgroundFree },
-];
-
-// 앱 시작 시 한 번 호출 — 서버에 저장된 오버라이드를 가져옵니다. 실패하면 빈
-// 객체를 돌려줘서 항상 TEXTS 기본값으로 자연스럽게 폴백되게 합니다.
-async function loadBannerTextOverrides() {
-  try {
-    const res = await fetch(`${RENDER_API_BASE}/api/banner-text`);
-    if (!res.ok) throw new Error(`문구 조회 실패 (${res.status})`);
-    const body = await res.json();
-    return body.overrides || {};
-  } catch (err) {
-    console.error("배너 문구 불러오기 실패:", err);
-    return {};
-  }
-}
-
-// 관리자 화면에서 저장할 때 호출 — { appTagline: "...", homeBannerTitle: "...", ... }
-// 형태의 객체를 그대로 넘기면 됩니다(값이 빈 문자열이면 서버 쪽에서 그 키를 지워
-// 기본값으로 자연스럽게 되돌아가게 처리합니다). 서버가 관리자 토큰을 요구하므로
-// adminToken(Admin 화면 로그인 시 받은 값)을 함께 넘겨야 합니다.
-async function saveBannerTextOverrides(overrides, adminToken) {
-  const res = await fetch(`${RENDER_API_BASE}/api/banner-text`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
-    body: JSON.stringify({ overrides }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "문구 저장에 실패했습니다.");
-  }
-  return true;
-}
-
-// bannerText(오버라이드 객체)와 키를 넘기면, 오버라이드가 있으면 그 값을, 없으면
-// TEXTS 기본값을 돌려줍니다. Home.jsx에서 TEXTS.appTagline 대신 이걸로 감싸서 씁니다.
-function bannerTextOf(bannerText, key) {
-  const override = bannerText?.[key];
-  return override && override.trim() ? override : TEXTS[key];
-}
-
-// ==================== screens/Admin ====================
-// 아주 가벼운 비밀번호 게이트입니다 — 진짜 권한 시스템(관리자 계정 로그인)이 아닙니다.
-// 실제 서비스에서는 Auth 화면의 관리자 로그인과 연결해야 합니다. 지금은 프로토타입이라
-// 브라우저에 하드코딩된 값과 비교만 합니다 — 이 비밀번호는 보안 장치가 아니라
-// "일반회원이 실수로 들어오는 것"을 막는 정도의 문턱입니다.
-// 2026-08-04: 비밀번호 확인이 이제 서버(Render)에서 이뤄집니다 — 여기 있던 하드코딩된
-// 값은 더 이상 안 쓰입니다. 실제 관리자 비밀번호는 Render 환경변수 ADMIN_PASSWORD에
-// 있습니다.
-
-function Admin({ go, back }) {
-  const [authed, setAuthed] = useState(false);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [companies, setCompanies] = useState([]);
-  const [busyId, setBusyId] = useState(null);
-  // 2026-08-04: 실제 서버 로그인이 되면서 추가 — 서버가 발급한 서명된 토큰을 여기
-  // 담아둡니다(브라우저를 새로고침하면 사라짐 — 이 미리보기 환경에선 localStorage를
-  // 못 쓰기 때문에 의도적으로 메모리에만 둡니다. 그래서 새로고침하면 재로그인 필요,
-  // 이건 이전(비밀번호만 확인) 방식과 동일한 제약입니다).
-  const [adminToken, setAdminToken] = useState(null);
-  const [loginBusy, setLoginBusy] = useState(false);
-  // 2026-08-02: 이 두 줄은 원래 아래 "if (!authed) return (...)" 다음에 있었습니다 —
-  // 그러면 로그인 전(authed=false)에는 이 useState들이 아예 호출이 안 되고, 로그인
-  // 후(authed=true)에만 호출되어서 같은 컴포넌트인데 렌더마다 훅 호출 개수가
-  // 달라지는 문제(Rules of Hooks 위반)가 있었습니다. 지금까지는 우연히 문제가
-  // 안 드러났을 수 있지만, 원칙대로 모든 훅은 조건 분기보다 위, 맨 앞에서
-  // 무조건 호출되어야 해서 여기로 옮겼습니다.
-  const [showRegisterForm, setShowRegisterForm] = useState(false);
-  const [registerResult, setRegisterResult] = useState("");
-  // 2026-08-02: 관리자가 실제로 "입금확인"을 할 수 있는 기능 — 주문 목록 상태.
-  const [orders, setOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [busyOrderNo, setBusyOrderNo] = useState(null);
-
-  useEffect(() => {
-    if (!authed) return;
-    (async () => {
-      await loadCompanyLibrary(); // 이전 세션에 저장된 것들까지 다 불러온 뒤에 목록을 만듭니다.
-      setCompanies([...COMPANY_DOMAIN]);
-      setLoading(false);
-    })();
-  }, [authed]);
-
-  // 2026-08-11: "관리자가 자주 바뀌는 문구를 바꿀 수 있게 해달라"는 요청 — 홈 화면
-  // 배너 문구 6개만 우선 대상. 서버에 저장된 값이 있으면 그걸로, 없으면 기본 문구로
-  // 폼을 채웁니다.
-  const [bannerTextForm, setBannerTextForm] = useState({});
-  const [bannerTextSaving, setBannerTextSaving] = useState(false);
-  const [bannerTextSaved, setBannerTextSaved] = useState(false);
-  const [bannerTextError, setBannerTextError] = useState("");
-  useEffect(() => {
-    if (!authed) return;
-    (async () => {
-      const overrides = await loadBannerTextOverrides();
-      const form = {};
-      for (const { key, defaultValue } of EDITABLE_BANNER_KEYS) form[key] = overrides[key] || defaultValue;
-      setBannerTextForm(form);
-    })();
-  }, [authed]);
-  const handleSaveBannerText = async () => {
-    setBannerTextSaving(true);
-    setBannerTextError("");
-    setBannerTextSaved(false);
-    try {
-      await saveBannerTextOverrides(bannerTextForm, adminToken);
-      setBannerTextSaved(true);
-    } catch (err) {
-      console.error("배너 문구 저장 실패:", err);
-      setBannerTextError(TEXTS.adminBannerTextSaveError);
-    } finally {
-      setBannerTextSaving(false);
-    }
-  };
-
-  const refreshOrders = async () => {
-    setOrdersLoading(true);
-    try {
-      setOrders(await listOrders(adminToken));
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
-  useEffect(() => {
-    if (!authed) return;
-    refreshOrders();
-  }, [authed]);
-
-  const handleConfirmDeposit = async (orderNo) => {
-    setBusyOrderNo(orderNo);
-    try {
-      await confirmDeposit(orderNo, adminToken);
-      await refreshOrders();
-    } catch (err) {
-      console.error("입금확인 처리 실패:", err);
-    } finally {
-      setBusyOrderNo(null);
-    }
-  };
-
-  // 2026-08-07: 진행상황 6단계 — 주문마다 "인쇄완료" 예정일을 따로 입력받아야 해서,
-  // 주문번호별로 입력값을 따로 기억해둡니다.
-  const [progressDateInputs, setProgressDateInputs] = useState({});
-  const handleAdvanceProgress = async (orderNo, nextStage, expectedPrintDate) => {
-    setBusyOrderNo(orderNo);
-    try {
-      await advanceProgress(orderNo, nextStage, adminToken, expectedPrintDate);
-      await refreshOrders();
-    } catch (err) {
-      console.error("진행상황 변경 실패:", err);
-    } finally {
-      setBusyOrderNo(null);
-    }
-  };
-
-  const refresh = () => setCompanies([...COMPANY_DOMAIN]);
-
-  const handleApprove = async (id) => {
-    setBusyId(id);
-    await updateCompanyStatus(id, "verified", { approvedBy: "admin", token: adminToken });
-    refresh();
-    setBusyId(null);
-  };
-
-  const handleReject = async (id) => {
-    setBusyId(id);
-    await removeCompany(id, adminToken);
-    refresh();
-    setBusyId(null);
-  };
-
-  if (!authed) {
-    return (
-      <div className="app-body">
-        <TopBar title={TEXTS.adminLoginTitle} onBack={back} go={go} />
-        <div style={{ padding: "16px 18px" }}>
-          <input
-            style={inputStyle}
-            type="password"
-            placeholder={TEXTS.adminPasswordPlaceholder}
-            value={passwordInput}
-            onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(""); }}
-          />
-          {passwordError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 8 }}>{passwordError}</div>}
-          <div style={{ marginTop: 14 }}>
-            <PrimaryButton
-              disabled={!passwordInput || loginBusy}
-              onClick={async () => {
-                setLoginBusy(true);
-                setPasswordError("");
-                try {
-                  const token = await adminLogin(passwordInput);
-                  setAdminToken(token);
-                  setAuthed(true);
-                } catch (err) {
-                  setPasswordError(err.message || TEXTS.adminPasswordWrong);
-                } finally {
-                  setLoginBusy(false);
-                }
-              }}
-            >
-              {TEXTS.adminLoginBtn}
-            </PrimaryButton>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const handleRegister = async (formData) => {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(formData.file);
-    });
-    const splitList = (str) => str.split(",").map((s) => s.trim()).filter(Boolean);
-    const result = await registerCompany({
-      name: formData.name,
-      aliases: splitList(formData.aliases),
-      logo: dataUrl,
-      logoType: formData.logoType,
-      industry: formData.industry || null,
-      homepage: formData.homepage || null,
-      officialLogoUrl: formData.officialLogoUrl || null,
-      emailDomains: splitList(formData.emailDomains),
-      source: "admin_registered", // 관리자가 직접 등록 → 기본 status: verified, qualityGrade: B
-    });
-    refresh();
-    if (result.registered) {
-      setRegisterResult(TEXTS.adminRegisterSuccess(result.company.name));
-      setShowRegisterForm(false);
-    } else if (result.mergedAlias) {
-      setRegisterResult(TEXTS.adminRegisterMerged(result.company.name));
-    } else {
-      setRegisterResult(TEXTS.adminRegisterDuplicate(result.company.name));
-    }
-  };
-
-  const pending = companies.filter((c) => c.status === "pending");
-  const others = companies.filter((c) => c.status !== "pending");
-
-  return (
-    <div className="app-body">
-      <TopBar title={TEXTS.adminReviewTitle} onBack={back} go={go} />
-      <div style={{ padding: "16px 18px" }}>
-        {/* 2026-08-11: 홈 배너 문구 관리 — 서버(routes/bannerText.js)에 GET/POST
-            /api/banner-text 엔드포인트 연결 완료. Supabase에 banner_text 테이블만
-            만들어주면 저장이 실제로 동작합니다(테이블 없으면 503 에러). */}
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.adminBannerTextSectionTitle}</div>
-        <Card style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {EDITABLE_BANNER_KEYS.map(({ key, label }) => (
-              <Field key={key} label={label}>
-                <input
-                  style={inputStyle}
-                  value={bannerTextForm[key] || ""}
-                  onChange={(e) => { setBannerTextForm({ ...bannerTextForm, [key]: e.target.value }); setBannerTextSaved(false); }}
-                />
-              </Field>
-            ))}
-          </div>
-          {bannerTextError && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 4 }}>{bannerTextError}</div>}
-          {bannerTextSaved && <div style={{ fontSize: 11.5, color: "#22B573", marginTop: 4 }}>{TEXTS.adminBannerTextSaved}</div>}
-          <div style={{ marginTop: 10 }}>
-            <PrimaryButton onClick={handleSaveBannerText} disabled={bannerTextSaving}>
-              {bannerTextSaving ? TEXTS.adminLoading : TEXTS.adminBannerTextSaveBtn}
-            </PrimaryButton>
-          </div>
-        </Card>
-
-        {/* 2026-08-02 신규: 실제로 입금확인을 처리할 수 있는 주문 관리 섹션.
-            ⚠️ 지금은 Complete.jsx(고객이 보는 화면)가 아직 이 실제 상태를 안 읽고
-            예전 방식(로컬 "미리보기" 버튼)을 그대로 씁니다 — 테스트 흐름이 막히지
-            않게 하기 위한 의도적 선택입니다. 실 서비스 전환 전 반드시 연결할 것
-            (PROJECT_HANDOFF.md에 기록됨). */}
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
-          {TEXTS.adminOrdersSectionTitle} ({orders.filter((o) => o.status !== ORDER_STATUS.CONFIRMED).length})
-        </div>
-        {ordersLoading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
-        {!ordersLoading && orders.length === 0 && (
-          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoOrders}</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-          {orders.map((o) => {
-            const confirmed = o.status === ORDER_STATUS.CONFIRMED;
-            const stage = o.progressStage ?? 0;
-            const isLastStage = stage >= ORDER_PROGRESS_STAGES.length - 1;
-            const nextStage = stage + 1;
-            const nextIsPrintDone = nextStage === PRINT_DONE_STAGE_INDEX;
-            return (
-              <Card key={o.orderNo}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{o.orderNo}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 3 }}>{TEXTS.adminOrderDepositorLine(o.depositor, o.categoryName)}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.adminOrderAmountLine(o.grandTotal)}</div>
-                    {o.bundlePhone && <div style={{ fontSize: 11.5, color: "var(--stamp)", fontWeight: 700 }}>{TEXTS.adminOrderBundleLine(o.bundlePhone)}</div>}
-                    {o.bundleAlone && <div style={{ fontSize: 11.5, color: "#d64545", fontWeight: 800, marginTop: 2 }}>{TEXTS.adminOrderBundleAloneWarning}</div>}
-                  </div>
-                  <div style={{
-                    fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, flexShrink: 0,
-                    color: confirmed ? "var(--stamp)" : "#B45309",
-                    background: confirmed ? "rgba(108,76,240,0.1)" : "#FEF3C7",
-                  }}>
-                    {o.status}
-                  </div>
-                </div>
-                {!confirmed && (
-                  <button
-                    disabled={busyOrderNo === o.orderNo}
-                    onClick={() => handleConfirmDeposit(o.orderNo)}
-                    style={{
-                      width: "100%", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                      padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)",
-                      color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
-                    }}
-                  >
-                    <Check size={14} /> {TEXTS.adminConfirmDepositBtn}
-                  </button>
-                )}
-                {confirmed && o.confirmedAt && (
-                  <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6 }}>
-                    {TEXTS.adminApprovalRecord(o.confirmedBy || "admin", o.confirmedAt)}
-                  </div>
-                )}
-                {/* 2026-08-07: 진행상황 6단계 — "디자인완료"는 이미 자동으로 참이라
-                    여기서는 그다음 단계부터 관리자가 하나씩 넘깁니다. 인쇄소·택배사
-                    시스템과 연동이 없어서 자동 감지가 불가능합니다. */}
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-                  <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 6 }}>
-                    {TEXTS.adminProgressLabel}: <b style={{ color: "var(--ink)" }}>{ORDER_PROGRESS_STAGES[stage]}</b>
-                    {o.expectedPrintDate && stage >= PRINT_DONE_STAGE_INDEX ? ` (${o.expectedPrintDate})` : ""}
-                  </div>
-                  {!isLastStage && (
-                    <>
-                      {nextIsPrintDone && (
-                        <input
-                          value={progressDateInputs[o.orderNo] || ""}
-                          onChange={(e) => setProgressDateInputs((prev) => ({ ...prev, [o.orderNo]: e.target.value }))}
-                          placeholder={TEXTS.adminExpectedDatePlaceholder}
-                          style={{ width: "100%", marginBottom: 6, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 12, fontFamily: "inherit" }}
-                        />
-                      )}
-                      <button
-                        disabled={busyOrderNo === o.orderNo}
-                        onClick={() => handleAdvanceProgress(o.orderNo, nextStage, nextIsPrintDone ? progressDateInputs[o.orderNo] : undefined)}
-                        style={{
-                          width: "100%", padding: "8px 0", borderRadius: 10, border: "1.4px solid var(--line)",
-                          background: "var(--paper-white)", color: "var(--ink)", fontWeight: 700, fontSize: 12, cursor: "pointer",
-                        }}
-                      >
-                        {TEXTS.adminNextStageBtn(ORDER_PROGRESS_STAGES[nextStage])}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* 이메일 발송 자체(EmailJS 연동)가 되는지 회사 인증 절차 없이 확인하는
-            관리자 전용 도구. 회사메일이 없어도 테스트할 수 있게 해주던 "테스트회사"
-            (gmail.com) 항목은 이제 지웠습니다 — verifyCompanyEmail이 개인 이메일
-            도메인을 아예 거부하도록 막아서 그 방법 자체가 더 안 통합니다. 대신 여기서는
-            회사 인증 로직을 거치지 않고 sendVerificationEmail을 직접 호출하기 때문에,
-            보안 구멍을 만들지 않으면서 "발송이 실제로 되는가"만 확인할 수 있습니다.
-            이미 관리자 비밀번호로 접근이 막혀있는 화면이라 안전합니다. */}
-        <EmailSendTestTool />
-        <BackgroundGenTestTool />
-        <div style={{ marginBottom: 20 }}>
-          <button
-            onClick={() => { setShowRegisterForm((v) => !v); setRegisterResult(""); }}
-            style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: showRegisterForm ? "var(--stamp)" : "var(--paper-white)", color: showRegisterForm ? "#fff" : "var(--stamp)", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
-          >
-            {showRegisterForm ? TEXTS.adminRegisterCloseBtn : TEXTS.adminRegisterOpenBtn}
-          </button>
-          {showRegisterForm && <RegisterForm onSubmit={handleRegister} />}
-          {registerResult && <div style={{ fontSize: 12, color: "var(--stamp)", marginTop: 8 }}>{registerResult}</div>}
-        </div>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
-          {TEXTS.adminPendingSectionTitle} ({pending.length})
-        </div>
-        {loading && <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{TEXTS.adminLoading}</div>}
-        {!loading && pending.length === 0 && (
-          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 20 }}>{TEXTS.adminNoPending}</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-          {pending.map((c) => (
-            <Card key={c.id}>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                {c.logo && (
-                  <img src={c.logo} alt="" style={{ width: 48, height: 48, objectFit: "contain", background: "var(--paper-deep)", borderRadius: 8, flexShrink: 0 }} />
-                )}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.name} <span style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 700 }}>{c.qualityGrade}등급</span></div>
-                  <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.adminSourceLabel(c.source)}</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button
-                  disabled={busyId === c.id}
-                  onClick={() => handleApprove(c.id)}
-                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--stamp)", background: "var(--stamp)", color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
-                >
-                  <Check size={14} /> {TEXTS.adminApproveBtn}
-                </button>
-                <button
-                  disabled={busyId === c.id}
-                  onClick={() => handleReject(c.id)}
-                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 0", borderRadius: 10, border: "1.4px solid var(--line)", background: "var(--paper-white)", color: "#d64545", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
-                >
-                  <X size={14} /> {TEXTS.adminRejectBtn}
-                </button>
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        {others.length > 0 && (
-          <>
-            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.adminOthersSectionTitle}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {others.map((c) => (
-                <div key={c.id} style={{ display: "flex", flexDirection: "column", padding: "8px 4px", fontSize: 12, borderBottom: "1px solid var(--line)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>{c.name}</span>
-                    <span style={{ color: "var(--ink-soft)" }}>{c.status}</span>
-                  </div>
-                  {c.approvedBy && (
-                    <div style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 2 }}>
-                      {TEXTS.adminApprovalRecord(c.approvedBy, c.approvedAt)}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// 관리자 전용, 회사 인증 로직 없이 EmailJS 발송 자체만 테스트합니다.
-function EmailSendTestTool() {
-  const [testEmail, setTestEmail] = useState("");
-  const [status, setStatus] = useState(null); // null | "sending" | "sent" | "error"
-  const [errorMsg, setErrorMsg] = useState("");
-
-  const handleTestSend = async () => {
-    setStatus("sending");
-    setErrorMsg("");
-    try {
-      const code = generateVerificationCode();
-      await sendVerificationEmail(testEmail, code);
-      setStatus("sent");
-    } catch (err) {
-      setStatus("error");
-      setErrorMsg(err.message || String(err));
-    }
-  };
-
-  return (
-    <Card style={{ marginBottom: 20, background: "var(--paper-deep)", border: "none" }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.adminEmailTestTitle}</div>
-      <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>{TEXTS.adminEmailTestDesc}</div>
-      <input
-        style={inputStyle}
-        type="email"
-        placeholder={TEXTS.adminEmailTestPlaceholder}
-        value={testEmail}
-        onChange={(e) => { setTestEmail(e.target.value); setStatus(null); }}
-      />
-      <div style={{ marginTop: 10 }}>
-        <PrimaryButton disabled={!testEmail || status === "sending"} onClick={handleTestSend}>
-          {status === "sending" ? TEXTS.adminEmailTestSending : TEXTS.adminEmailTestBtn}
-        </PrimaryButton>
-      </div>
-      {status === "sent" && <div style={{ fontSize: 11.5, color: "var(--stamp)", marginTop: 8, fontWeight: 600 }}>{TEXTS.adminEmailTestSuccess}</div>}
-      {status === "error" && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 8 }}>{TEXTS.adminEmailTestFail}: {errorMsg}</div>}
-    </Card>
-  );
-}
-
-// 2026-08-08: AI 배경 생성(Replicate·Flux Schnell) 연결 확인용 — 위 이메일 테스트
-// 도구와 같은 패턴입니다. 실제로 비용이 발생하는 호출이라(장당 약 1~4원), 테스트도
-// 신중하게 — 여기서도 누를 때마다 과금됩니다.
-function BackgroundGenTestTool() {
-  const [prompt, setPrompt] = useState("차분하고 신뢰감 있는 파란색 계열의 추상적인 그라데이션 배경, 명함용");
-  const [status, setStatus] = useState(null); // null | "generating" | "done" | "error"
-  const [errorMsg, setErrorMsg] = useState("");
-  const [imageUrl, setImageUrl] = useState(null);
-
-  const handleTestGenerate = async () => {
-    setStatus("generating");
-    setErrorMsg("");
-    setImageUrl(null);
-    try {
-      const res = await fetch(`${RENDER_API_BASE}/api/generate-background`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, widthMm: 90, heightMm: 50 }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `요청 실패 (${res.status})`);
-      setImageUrl(body.images?.[0] || null);
-      setStatus("done");
-    } catch (err) {
-      setStatus("error");
-      setErrorMsg(err.message || String(err));
-    }
-  };
-
-  return (
-    <Card style={{ marginBottom: 20, background: "var(--paper-deep)", border: "none" }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.adminBgTestTitle}</div>
-      <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>{TEXTS.adminBgTestDesc}</div>
-      <textarea
-        style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
-        value={prompt}
-        onChange={(e) => { setPrompt(e.target.value); setStatus(null); }}
-      />
-      <div style={{ marginTop: 10 }}>
-        <PrimaryButton disabled={!prompt || status === "generating"} onClick={handleTestGenerate}>
-          {status === "generating" ? TEXTS.adminBgTestGenerating : TEXTS.adminBgTestBtn}
-        </PrimaryButton>
-      </div>
-      {status === "done" && imageUrl && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 6 }}>{TEXTS.adminBgTestSuccess}</div>
-          <img src={imageUrl} alt="생성된 배경 미리보기" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)" }} />
-        </div>
-      )}
-      {status === "error" && <div style={{ fontSize: 11.5, color: "#d64545", marginTop: 8 }}>{TEXTS.adminBgTestFail}: {errorMsg}</div>}
-    </Card>
-  );
-}
-
-// 관리자가 새 회사를 직접 등록하는 폼. registerCompany()를 호출하는 유일한
-// "관리자 등록" 진입점입니다 — 계약회원/일반회원 업로드는 Design.jsx 쪽에서
-// 이미 registerCompany()를 호출하고 있어서 여기서는 admin_registered 경로만 담당합니다.
-function RegisterForm({ onSubmit }) {
-  const [name, setName] = useState("");
-  const [aliases, setAliases] = useState("");
-  const [logoType, setLogoType] = useState(COMPANY_LOGO_TYPES.CORPORATE);
-  const [industry, setIndustry] = useState("");
-  const [homepage, setHomepage] = useState("");
-  const [officialLogoUrl, setOfficialLogoUrl] = useState("");
-  const [emailDomains, setEmailDomains] = useState("");
-  const [file, setFile] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const canSubmit = name.trim() && file && !submitting;
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      await onSubmit({ name: name.trim(), aliases, logoType, industry, homepage, officialLogoUrl, emailDomains, file });
-      setName(""); setAliases(""); setIndustry(""); setHomepage(""); setOfficialLogoUrl(""); setEmailDomains(""); setFile(null);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Card style={{ marginTop: 10 }}>
-      <Field label={TEXTS.adminFormNameLabel}>
-        <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder={TEXTS.adminFormNamePlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormAliasesLabel}>
-        <input style={inputStyle} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={TEXTS.adminFormAliasesPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormLogoTypeLabel}>
-        <select style={inputStyle} value={logoType} onChange={(e) => setLogoType(e.target.value)}>
-          {Object.values(COMPANY_LOGO_TYPES).map((t) => (
-            <option key={t} value={t}>{TEXTS.adminLogoTypeLabel(t)}</option>
-          ))}
-        </select>
-      </Field>
-      <Field label={TEXTS.adminFormIndustryLabel}>
-        <input style={inputStyle} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder={TEXTS.adminFormIndustryPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormHomepageLabel}>
-        <input style={inputStyle} value={homepage} onChange={(e) => setHomepage(e.target.value)} placeholder={TEXTS.adminFormHomepagePlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormOfficialLogoUrlLabel}>
-        <input style={inputStyle} value={officialLogoUrl} onChange={(e) => setOfficialLogoUrl(e.target.value)} placeholder={TEXTS.adminFormOfficialLogoUrlPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormEmailDomainsLabel}>
-        <input style={inputStyle} value={emailDomains} onChange={(e) => setEmailDomains(e.target.value)} placeholder={TEXTS.adminFormEmailDomainsPlaceholder} />
-      </Field>
-      <Field label={TEXTS.adminFormLogoFileLabel}>
-        <UploadBox label={TEXTS.adminFormLogoFileLabel} icon={Upload} done={!!file} fileName={file?.name} onFile={setFile} accept=".png,.jpg,.jpeg,.svg" />
-      </Field>
-      <PrimaryButton disabled={!canSubmit} onClick={handleSubmit}>
-        {submitting ? TEXTS.adminFormSubmitting : TEXTS.adminFormSubmitBtn}
-      </PrimaryButton>
-    </Card>
-  );
-}
-
 // ==================== data/categories ====================
 // printSides: 양면인쇄 옵션 제공 여부 / numbering: 넘버링 옵션 제공 여부 / onlyOptions: 이 코드만 사용 가능한 옵션 목록(제한이 없으면 생략)
 const CATEGORIES = [
@@ -6578,6 +6118,85 @@ const CATEGORIES = [
   { code: "cat08", name: "멤버십카드", tagline: "VIP회원카드", icon: UserCircle2, iconBg: "#EEEBFB", iconFg: "#7C5CDB", note: "단가 확인 필요", printSides: true, numbering: true, onlyOptions: ["OPT002"] },
   { code: "cat05", name: "에폭시명함", tagline: "에폭시 코팅", icon: Star, iconBg: "#E8F1FE", iconFg: "#3B82F6", note: "넘버링·양면 불가", printSides: false, numbering: false },
   { code: "cat06", name: "금박·은박명함", tagline: "금박 · 은박으로 빛나는 품격", icon: Award, iconBg: "#FCE8EE", iconFg: "#E63A6B", note: "넘버링·양면 불가", printSides: false, numbering: false },
+];
+
+// ==================== data/papers ====================
+const PAPERS = [
+  // 2026-08-11: recommended:true — 일반회원용 "추천 기본값"에 쓰이는 용지 표시.
+  // 카테고리에 진입했을 때 아직 아무 용지도 안 골랐으면(paperCode===null) 이 용지가
+  // 자동으로 선택됩니다(screens/Product.jsx의 useEffect 참고). 스노우지백색 계열
+  // 무광코팅을 기본 추천으로 정했고, 해당하는 용지가 없는 카테고리(cat03/04/08)는
+  // recommended가 없어 목록 첫 번째 용지로 자동 대체됩니다 — 그 3개 카테고리는
+  // 정확히 뭘 추천 기본값으로 할지 아직 확인 못 받아서 우선 안전한 기본 동작만
+  // 넣어뒀습니다.
+  // 2026-08-09: "빠른스노우250g"(pa001) 삭제 — 빠른명함 카테고리는 이제 스노우지250g,
+  // 스노우지300g 2가지 용지만 제공합니다.
+  { code: "pa002", cat: "cat01", name: "스노우지250g", sheets: 500, base: 4620, general: 14000, special: 5590, choice: "무광코팅,코팅없음", desc: "코팅없음은 넘버링가능(450매,기준가40,000원)", recommended: true, earRoundFee: 3300 },
+  { code: "pa003", cat: "cat01", name: "스노우지300g", sheets: 200, base: 4620, general: 14000, special: 5590, choice: "무광코팅,유광코팅", desc: "고급스러운 광택 옵션 선택 가능", numbering: false },
+  { code: "pa004", cat: "cat02", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 박이나 에폭시가 잘 어울림", recommended: true },
+  { code: "pa005", cat: "cat02", name: "반누보화이트204g", sheets: 200, base: 6050, general: 15000, special: 7321, desc: "부드럽고 따뜻한 질감의 고급지. 잉크가 은은하게 표현됨" },
+  { code: "pa006", cat: "cat02", name: "반누보스노우화이트227g", sheets: 200, base: 7050, general: 17000, special: 8531, desc: "반누보보다 더 밝고 깨끗한 느낌. 고급스럽고 차분함" },
+  { code: "pa007", cat: "cat02", name: "반누보화이트320g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "반누보 특유의 질감 + 두꺼운 프리미엄 느낌" },
+  { code: "pa008", cat: "cat02", name: "아르미울트라화이트230g", sheets: 300, base: 4620, general: 15000, special: 5590, desc: "무난한 기본형 고급지. 다양한 업종에 적합" },
+  { code: "pa009", cat: "cat02", name: "아르미울트라화이트310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "은은한 펄(광택) 효과가 있는 특수지. 고급스럽고 화려함" },
+  { code: "pa010", cat: "cat02", name: "엑스트라매트백색350g", sheets: 200, base: 8800, general: 19000, special: 10648, desc: "섬유 느낌이 살아있는 독특한 질감. 감성적인 분위기" },
+  { code: "pa011", cat: "cat02", name: "랑데뷰내추럴310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "가장 인기 있는 프리미엄 고급지. 부드럽고 따뜻한 감성" },
+  { code: "pa017", cat: "cat02", name: "아쿠아사틴256g", sheets: 200, base: 17600, general: 35200, special: 21296, desc: "미세한 패턴 질감이 있는 유럽풍 고급지" },
+  { code: "pa018", cat: "cat02", name: "인버코트350g", sheets: 200, base: 18700, general: 37400, special: 22627, desc: "반짝이는 펄 효과. 조명에서 고급스럽게 빛남" },
+  { code: "pa020", cat: "cat02", name: "베이직백색233g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "매우 부드러운 촉감. 감성 브랜드·카페 스타일에 적합" },
+  { code: "pa021", cat: "cat02", name: "스타드림쿼츠240g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "골드 펄 느낌이 나는 화려한 특수지" },
+  { code: "pa022", cat: "cat02", name: "린넨커버솔라화이트216g", sheets: 200, base: 6050, general: 17000, special: 7321, desc: "매우 두꺼운 최고급지. 고급 브랜드용 추천" },
+  { code: "pa024", cat: "cat02", name: "크리스탈펄화이트235g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "검정색 특수지. 금박/은박과 조합 시 매우 고급스러움" },
+  { code: "pa025", cat: "cat02", name: "매쉬멜로우화이트209g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "물에 강한 합성지. 찢어짐과 습기에 강함" },
+  { code: "pa026", cat: "cat02", name: "다이니티골드펄250g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "친환경 크라프트 느낌. 자연주의·수제 감성", numbering: false },
+  { code: "pa027", cat: "cat02", name: "에그쉘엑스트라화이트400g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "벨벳처럼 부드러운 촉감. 최고급 감성 명함" },
+  { code: "pa028", cat: "cat03", name: "매트블랙380g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "매우 두꺼운 합지 스타일. 존재감 강함", numbering: false },
+  { code: "pa029", cat: "cat03", name: "유포지FEB250", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "푸른빛 펄 효과의 화려한 특수지", numbering: false },
+  { code: "pa030", cat: "cat03", name: "뉴크라프트보드300g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "단단하고 깔끔한 초고급 백색지" },
+  { code: "pa031", cat: "cat03", name: "벨벳화이트359g", sheets: 200, base: 9900, general: 20000, special: 11979, desc: "은은한 골드톤 특수지. 고급스러운 분위기 강조", numbering: false },
+  { code: "pa032", cat: "cat03", name: "듀오화이트400g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "물에 젖지않는 고급스러움" },
+  { code: "pa033", cat: "cat03", name: "블루펄스타250g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "느껴지는 독특한 텍스추어" },
+  { code: "pa035", cat: "cat03", name: "키칼라아이스골드250g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "최상의 멋스러움" },
+  { code: "pa036", cat: "cat03", name: "아트지백색300g", sheets: 200, base: 8800, general: 20000, special: 10648, desc: "매끄럽고 인쇄 발색이 선명한 아트지", numbering: false },
+  // 2026-08-16: 카드명함 카테고리가 원래 onlyOptions:["OPT002"]로 인쇄방식(OPT001)
+  // 선택 자체를 안 보여주고 있었습니다 — 아마 이 4개 용지가 전부 단면만 가능해서
+  // 그렇게 막아뒀던 것으로 보입니다. 이번에 카테고리 전체의 OPT001을 열면서, 이
+  // 4개 용지가 실제로 양면도 가능한지 확인 못 받아서 일단 안전하게 singleSidedOnly를
+  // 붙여 예전과 똑같이 단면만 나오게 해뒀습니다 — 양면도 가능하다면 알려주세요.
+  { code: "pa037", cat: "cat04", name: "PET투명300", sheets: 200, base: 16500, general: 33000, special: 19965, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa038", cat: "cat04", name: "Luxury카드명함화이트", sheets: 200, base: 12100, general: 24200, special: 14641, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa039", cat: "cat04", name: "Luxury카드명함실버", sheets: 200, base: 16500, general: 33000, special: 19965, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  { code: "pa040", cat: "cat04", name: "Luxury카드명함골드", sheets: 200, base: 23100, general: 46200, special: 27951, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
+  // 2026-08-16: 카드명함(cat04) 용지 10종 추가. 사이즈는 이 카테고리 전체가 이미
+  // 86×54(작업사이즈 90×58)로 고정이라 손댈 필요 없음(FIXED_SIZE_CATEGORY 참고).
+  // 가격 공식은 기존 cat04 용지들과 동일: general=base×2, special=base×1.21.
+  // 누드·누드플러스·실버 3종은 단면인쇄만 가능(singleSidedOnly) — 인쇄방식 선택지에서
+  // "양면명함" 자체가 안 보입니다. 실버플러스·골드·골드플러스 3종은 단면/양면 가격이
+  // 같아서(추가 설정 없음) 기존 용지들과 똑같이 동작합니다. 금펄·은펄·금펄플러스·
+  // 은펄플러스 4종은 양면 선택 시 +1,200원(doubleSidePremium)이 붙습니다.
+  { code: "pa059", cat: "cat04", name: "누드", sheets: 200, base: 12760, general: 25520, special: 15440, singleSidedOnly: true, desc: "단면인쇄만 가능", noEarRound: true },
+  { code: "pa060", cat: "cat04", name: "누드플러스", sheets: 200, base: 12760, general: 25520, special: 15440, singleSidedOnly: true, desc: "단면인쇄만 가능", noEarRound: true },
+  { code: "pa061", cat: "cat04", name: "실버", sheets: 200, base: 15730, general: 31460, special: 19033, singleSidedOnly: true, desc: "단면인쇄만 가능", noEarRound: true },
+  { code: "pa062", cat: "cat04", name: "실버플러스", sheets: 200, base: 24860, general: 49720, special: 30081, desc: "단면·양면 가격 동일", noEarRound: true },
+  { code: "pa063", cat: "cat04", name: "골드", sheets: 200, base: 25410, general: 50820, special: 30746, desc: "단면·양면 가격 동일", noEarRound: true },
+  { code: "pa064", cat: "cat04", name: "골드플러스", sheets: 200, base: 29040, general: 58080, special: 35138, desc: "단면·양면 가격 동일", noEarRound: true },
+  { code: "pa065", cat: "cat04", name: "금펄", sheets: 200, base: 26620, general: 53240, special: 32210, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
+  { code: "pa066", cat: "cat04", name: "은펄", sheets: 200, base: 26620, general: 53240, special: 32210, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
+  { code: "pa067", cat: "cat04", name: "금펄플러스", sheets: 200, base: 29040, general: 58080, special: 35138, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
+  { code: "pa068", cat: "cat04", name: "은펄플러스", sheets: 200, base: 29040, general: 58080, special: 35138, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
+  { code: "pa041", cat: "cat05", name: "아르미울트라화이트230g", sheets: 300, base: 11000, general: 22000, special: 13310, desc: "무난한 기본형 고급지" },
+  { code: "pa043", cat: "cat05", name: "아쿠아사틴256g", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "미세한 패턴 질감의 유럽풍 고급지" },
+  { code: "pa045", cat: "cat05", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 에폭시가 잘 어울림", recommended: true },
+  { code: "pa047", cat: "cat05", name: "반누보화이트204g", sheets: 200, base: 10450, general: 20900, special: 12645, desc: "부드럽고 따뜻한 질감의 고급지" },
+  { code: "pa051", cat: "cat06", name: "아르미울트라화이트230g", sheets: 300, base: 12650, general: 25300, special: 15307, choice: "금박유광,금박무광,은박유광,은박무광", desc: "무난한 기본형 고급지" },
+  { code: "pa052", cat: "cat06", name: "아르미울트라화이트310g", sheets: 200, base: 13000, general: 26000, special: 15730, choice: "금박유광,금박무광,은박유광,은박무광", desc: "은은한 펄 효과. 고급스럽고 화려함" },
+  { code: "pa055", cat: "cat06", name: "스노우지백색300g무광코팅", sheets: 200, base: 15620, general: 31240, special: 18900, choice: "금박유광,금박무광,은박유광,은박무광", desc: "백색위에 박이 잘 어울림", recommended: true },
+  { code: "pa056", cat: "cat06", name: "반누보화이트204g", sheets: 200, base: 11550, general: 23100, special: 13976, choice: "금박유광,금박무광,은박유광,은박무광", desc: "부드럽고 따뜻한 질감의 고급지" },
+  // 2026-08-07: "복권명함"·"멤버십카드" 카테고리 신설에 맞춰 추가 — ⚠️ 실제 원가·
+  // 거래처가 확정되지 않아 다른 카테고리 값을 참고한 추정치입니다. 실제 주문을
+  // 받기 전에 반드시 정확한 값으로 교체해주세요.
+  { code: "pa057", cat: "cat07", name: "스노우지백색300g무광코팅(임시)", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "⚠️ 임시 단가 — 긁는 코팅 실제 원가 확인 후 교체 필요", recommended: true },
+  { code: "pa058", cat: "cat08", name: "PET투명300(임시)", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "⚠️ 임시 단가 — 실제 원가 확인 후 교체 필요" },
 ];
 
 // ==================== domain/company/supabaseAuth ====================
@@ -6950,6 +6569,451 @@ function PendingApproval({ order, patch, go, back }) {
             <PrimaryButton onClick={() => go("design")}>{TEXTS.pendingContinueBtn}</PrimaryButton>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== screens/Shipping ====================
+function ConfirmDialog({ title, message, cancelLabel, confirmLabel, onCancel, onConfirm }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(15,15,30,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20,
+    }}>
+      <div style={{
+        background: "var(--paper-white)", borderRadius: 16, padding: "22px 20px", maxWidth: 320, width: "100%",
+        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.6, marginBottom: 18, whiteSpace: "pre-line" }}>{message}</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onCancel} style={{
+            flex: 1, padding: "11px 0", borderRadius: 10, border: "1.5px solid var(--line)",
+            background: "var(--paper-white)", color: "var(--ink)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>{cancelLabel}</button>
+          <button onClick={onConfirm} style={{
+            flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
+            background: "var(--stamp)", color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Shipping({ order, patch, go, back, freeShip }) {
+  const s = order.ship;
+  const setShip = (p) => patch({ ship: { ...s, ...p } });
+  const canNext = s.name && s.addr && s.phone;
+  const [confirmBack, setConfirmBack] = useState(false);
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.shippingTitle} onBack={() => setConfirmBack(true)} step={5} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <Field label={TEXTS.shippingNameLabel}><input style={inputStyle} value={s.name} onChange={(e) => setShip({ name: e.target.value })} placeholder={TEXTS.namePlaceholder} /></Field>
+        <Field label={TEXTS.shippingAddrLabel}><input style={inputStyle} value={s.addr} onChange={(e) => setShip({ addr: e.target.value })} placeholder={TEXTS.shippingAddrPlaceholder} /></Field>
+        <Field label={TEXTS.shippingPhoneLabel}><input style={inputStyle} value={s.phone} onChange={(e) => setShip({ phone: e.target.value })} placeholder={TEXTS.phonePlaceholder} /></Field>
+
+        <Card style={{ background: "var(--paper-deep)", border: "none" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <Truck size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+              <Stamp active={freeShip} tone={freeShip ? "gold" : "stamp"}>{freeShip ? TEXTS.shipFreeApplied : TEXTS.shipFeeApplied}</Stamp>
+            </div>
+          </div>
+        </Card>
+      </div>
+      <div style={{ padding: "8px 18px 18px" }}>
+        <PrimaryButton disabled={!canNext} onClick={() => go("payment")}>{TEXTS.nextPayment}</PrimaryButton>
+        {!canNext && (
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
+            {TEXTS.missingFieldsHint}
+            {[!s.name && TEXTS.shippingNameLabel, !s.addr && TEXTS.shippingAddrLabel, !s.phone && TEXTS.shippingPhoneLabel].filter(Boolean).join(", ")}
+          </div>
+        )}
+      </div>
+
+      {/* 2026-08-16: "디자인이 초기화된다"는 문제 자체를 App.jsx에서 고쳤으므로(더 이상
+          안 사라짐), 초기화 경고는 없앴습니다. 대신 AI 디자인을 다시 쓰면(재생성)
+          추가요금이 붙을 수 있다는 것만 한 번에 안내하는 단일 확인창으로 바꿨습니다. */}
+      {confirmBack && (
+        <ConfirmDialog
+          title={TEXTS.backAiFeeWarnTitle}
+          message={TEXTS.backAiFeeWarnMessage}
+          cancelLabel={TEXTS.backResetCancel}
+          confirmLabel={TEXTS.backResetConfirm}
+          onCancel={() => setConfirmBack(false)}
+          onConfirm={() => { setConfirmBack(false); back(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ==================== domain/company/orderNotification ====================
+// ====================================================================
+// Domain : Company / Order Notification
+// Responsibility : 새 주문이 들어오면 관리자(goodplus.kr@gmail.com)에게 이메일로
+//                  알려줍니다. emailVerification.js(회사 이메일 소유 확인)와는
+//                  완전히 다른 기능입니다 — 저건 사용자가 입력한 이메일 주소가
+//                  진짜 자기 것인지 확인하는 용도이고, 이건 사장님 본인에게
+//                  "주문이 들어왔다"를 알리는 용도입니다. 서로 다른 EmailJS 템플릿을
+//                  씁니다(변수가 다름: 이쪽은 {{name}}/{{message}}/{{order_id}}).
+//
+// 여기 SERVICE_ID/TEMPLATE_ID는 자리표시자가 아니라, 예전 세션에서 실제로 테스트
+// 발송까지 확인된 값입니다(2026-07-29, service_c48f848 / template_fgijlbe,
+// Gmail 수신 확인됨). 다만 "To Email"은 코드가 아니라 EmailJS 템플릿 자체 설정에
+// 고정되어 있어서(goodplus.kr@gmail.com), 여기서 template_params로 보내지 않습니다.
+// ====================================================================
+const ORDER_EMAILJS_SERVICE_ID = "service_c48f848";
+const EMAILJS_ORDER_TEMPLATE_ID = "template_fgijlbe";
+// PUBLIC_KEY도 emailVerification.js와 같은 EmailJS 계정 값으로 확인됐습니다.
+const ORDER_EMAILJS_PUBLIC_KEY = "Z2ZomPLGBnjrB9_2x";
+
+// order 객체에서 사람이 읽기 좋은 주문 요약 텍스트를 만듭니다. 어떤 필드가 정확히
+// 있는지는 App.jsx의 order 상태 모양을 따릅니다 — 없는 필드는 조용히 건너뜁니다.
+function buildOrderSummary(order, extra = {}) {
+  const lines = [
+    extra.categoryName && `카테고리: ${extra.categoryName}`,
+    extra.paperName && `용지: ${extra.paperName}`,
+    order.sets && `수량: ${order.sets}세트`,
+    extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
+    extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
+    order.depositor && `입금자명: ${order.depositor}`,
+    order.ship?.name && `받는분: ${order.ship.name}`,
+    order.ship?.phone && `연락처: ${order.ship.phone}`,
+    order.ship?.addr && `주소: ${order.ship.addr}`,
+    // 뒷면을 "직접 설명하기"로 고른 경우, 정해진 템플릿 없이 담당자가 직접 만들어야
+    // 하므로 그 설명을 반드시 여기 남깁니다 — 첨부는 앞면 파일 하나만 가는 구조라서
+    // (아래 한계 참고), 참고 이미지를 올렸다면 그 사실도 같이 알려줍니다.
+    order.backCustomNote && `\n[뒷면 직접 요청]\n${order.backCustomTags?.length ? `희망 내용: ${order.backCustomTags.join(", ")}\n` : ""}${order.backCustomNote}`,
+    order.backCustomFile && `(뒷면 참고 이미지 첨부됨 — 파일명: ${order.backCustomFile.name}. 첨부 슬롯은 앞면 파일과 공유라 안 붙었을 수 있어요, 확인 필요)`,
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+// 파일을 base64로 바꿉니다 — 이메일 첨부와 window.storage 저장 둘 다 이 형태가 필요해서
+// 이름을 용도 하나에 묶지 않고 범용으로 둡니다.
+function fileToBase64DataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// window.storage는 텍스트 전용, 한 값당 5MB 제한입니다. base64로 바꾸면 원본보다
+// 커지므로(약 1.33배), 원본 기준 이 크기까지만 저장을 "시도"합니다. 저장은 의무가
+// 아니라 재주문 편의를 위한 정책일 뿐이라, 안 되면 강제로 방법을 찾지 않고 그냥
+// "용량이 커서 저장이 안 된다"고 안내하고 넘어갑니다.
+const MAX_STORABLE_FILE_BYTES = 3 * 1024 * 1024;
+
+// ⚠️ 설정 필요: EmailJS에서 첨부파일 발송은 유료 플랜에서만 됩니다(2026-07-30 기준
+// 공식 문서 확인). 그리고 템플릿의 Attachments 탭에 "Variable Attachment" 타입으로
+// 파라미터 이름(예: attachment)을 등록해둬야, 여기서 보내는 값이 실제로 첨부됩니다 —
+// 코드만으로는 안 되고 EmailJS 대시보드에서 템플릿 설정을 한 번 해주셔야 합니다.
+//
+// attachment는 File 객체(특별회원이 올린 파일)이거나, { dataUrl } 형태로 이미 계산된
+// base64(AI가 만든 인쇄용 SVG — 이미 텍스트라 File로 감쌀 필요 없이 바로 씀)일 수 있습니다.
+async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment = null) {
+  const message = buildOrderSummary(order, extra);
+  const templateParams = {
+    name: order.ship?.name || order.depositor || "고객",
+    message,
+    order_id: orderNo,
+  };
+  if (attachment) {
+    try {
+      templateParams.attachment = attachment.dataUrl ? attachment.dataUrl : await fileToBase64DataUrl(attachment);
+    } catch {
+      // 첨부 변환에 실패해도 주문 알림 이메일 자체는 보내야 하므로 무시하고 진행
+    }
+  }
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: ORDER_EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_ORDER_TEMPLATE_ID,
+      user_id: ORDER_EMAILJS_PUBLIC_KEY,
+      template_params: templateParams,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`주문 알림 이메일 발송 실패 (${res.status})`);
+  }
+}
+
+// ==================== utils/format ====================
+const won = (n) => `${Math.round(n).toLocaleString("ko-KR")}원`;
+
+// ==================== screens/Payment ====================
+function Payment({ order, patch, go, back, paper, category, unit, optTotal, shipFee, goodsTotal, grandTotal }) {
+  const [agreedTerms, setAgreedTerms] = useState(false);
+  const [validationMsg, setValidationMsg] = useState("");
+  const [highlightTerms, setHighlightTerms] = useState(false);
+  const depositorRef = React.useRef(null);
+  const termsBoxRef = React.useRef(null);
+  const optLines = Object.entries(order.selOptions)
+    .map(([code, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === code), sel))
+    .filter(Boolean);
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.paymentTitle} onBack={back} step={6} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.orderSummaryTitle}</div>
+          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
+          <SummaryRow k={TEXTS.summaryPaperLabel} v={paper?.name} />
+          {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
+          <SummaryRow k={TEXTS.summaryOptionLabel} v={optLines.length ? optLines.join(", ") : TEXTS.summaryNone} />
+          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
+          <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
+        </Card>
+
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
+          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
+          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
+          <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
+          {order.bundlePhone?.trim() && <SummaryRow k={TEXTS.bundleShippingTitle} v={order.bundlePhone} />}
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 14, fontWeight: 900 }}>{TEXTS.grandTotalLabel}</span>
+            <span style={{ fontSize: 17, fontWeight: 900, color: "var(--stamp)" }}>{won(grandTotal)}</span>
+          </div>
+        </Card>
+
+        <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <Landmark size={16} color="var(--ink-soft)" style={{ marginTop: 1, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{TEXTS.bankInfoTitle}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>{TEXTS.bankAccount}</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{TEXTS.bankHolder}</div>
+            </div>
+          </div>
+        </Card>
+
+        <Field label={TEXTS.depositorLabel}><input ref={depositorRef} style={inputStyle} value={order.depositor} onChange={(e) => patch({ depositor: e.target.value })} placeholder={TEXTS.depositorPlaceholder} /></Field>
+
+        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 10, lineHeight: 1.5 }}>{TEXTS.cmykColorNotice}</div>
+
+        {/* 2026-08-04: "체크를 해야 버튼이 눌리는데, 그걸 몰랐다"는 신고 반영 —
+            기존엔 옅은 회색 글씨 + 작은 체크박스뿐이라 눈에 잘 안 띄었습니다.
+            제목이 있는 박스로 감싸서 "여기 뭔가 확인할 게 있다"는 게 먼저
+            눈에 들어오게 했습니다. */}
+        <div
+          ref={termsBoxRef}
+          onClick={() => { setAgreedTerms((v) => !v); setValidationMsg(""); }}
+          style={{
+            marginTop: 14, padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+            border: `${highlightTerms ? 2.5 : 1.5}px solid ${agreedTerms ? "var(--stamp)" : "#F0B429"}`,
+            background: agreedTerms ? "rgba(108,76,240,0.05)" : "#FFFBEB",
+            boxShadow: highlightTerms ? "0 0 0 4px rgba(240,180,41,0.35)" : "none",
+            transition: "box-shadow 0.3s, border-width 0.2s",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 800, color: agreedTerms ? "var(--stamp)" : "#B45309", marginBottom: 6 }}>
+            {TEXTS.termsAgreementBoxTitle}
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <div style={{
+              width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0,
+              border: `1.5px solid ${agreedTerms ? "var(--stamp)" : "var(--line)"}`,
+              background: agreedTerms ? "var(--stamp)" : "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {agreedTerms && <Check size={12} color="#fff" />}
+            </div>
+            <span style={{ fontSize: 11.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>{TEXTS.termsLogoLiabilityLabel}</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "8px 18px 18px" }}>
+        {validationMsg && (
+          <div style={{
+            fontSize: 12, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+            borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontWeight: 700, textAlign: "center",
+          }}>
+            {validationMsg}
+          </div>
+        )}
+        <PrimaryButton
+          looksDisabled={!order.depositor || !agreedTerms}
+          icon={CreditCard}
+          onClick={async () => {
+            // 2026-08-07: "체크박스를 못 찾아서 버튼이 안 눌린다"는 신고 반영 —
+            // 예전엔 조건이 안 맞으면 버튼 자체가 브라우저 disabled 상태라 눌러도
+            // 아무 반응이 없었습니다(React onClick조차 안 불림). 이제 버튼은 항상
+            // 눌리고, 조건이 안 맞으면 뭐가 문제인지 알려주고 그 위치로 화면을
+            // 이동시켜서 스스로 원인을 못 찾는 일이 없게 했습니다.
+            if (!order.depositor) {
+              setValidationMsg(TEXTS.paymentMissingDepositor);
+              depositorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+              depositorRef.current?.focus();
+              return;
+            }
+            if (!agreedTerms) {
+              setValidationMsg(TEXTS.paymentMissingAgreement);
+              termsBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+              setHighlightTerms(true);
+              setTimeout(() => setHighlightTerms(false), 1500);
+              return;
+            }
+            setValidationMsg("");
+            // 실제 서비스에서는 이 주문번호를 서버가 발급해야 합니다.
+            // 지금은 프론트엔드 프로토타입이라 임시로 생성하고, 새로고침 전까지는 값이 바뀌지 않도록 order 상태에 저장해둡니다.
+            const orderNo = `BC${Date.now().toString().slice(-8)}`;
+            patch({ orderNo });
+            // 2026-08-04: 예전에 여기 있던 window.storage 기록(orderByPhone)을 지웠습니다 —
+            // Home.jsx의 "내 주문 조회"가 이제 실제 서버를 조회하므로, 이 기록을 읽는
+            // 코드가 더 이상 없어서 그대로 두면 아무 효과 없이 개인정보만 남기는
+            // 죽은 코드였습니다. ⚠️ 다만 이 기록에만 있던 printFileSvg(인쇄파일)·
+            // specialOrderFile(특별회원 업로드 파일)은 서버 쪽에 아직 저장할 곳이
+            // 없어서, 지금은 재주문 시 "저장된 파일 그대로" 가져오는 기능 자체가
+            // 없습니다 — design_recipe가 있는 주문만 그 설계도로 다시 만들 수 있습니다
+            // (Supabase Storage 연동 전까지의 알려진 한계).
+            // 2026-08-04: 실제 서버(Render+Supabase)가 배포되면서 recordNewOrder가
+            // 진짜 데이터베이스에 저장합니다. 이 저장은 실패해도 결제 접수 자체를
+            // 막으면 안 되므로(서버가 잠깐 응답 없거나 일시적 오류가 나도 고객은
+            // 정상적으로 다음 화면으로 넘어가야 함), await 없이 그대로 흘려보냅니다.
+            recordNewOrder(orderNo, {
+              customerPhone: order.ship?.phone?.trim(), customerName: order.ship?.name || order.name,
+              categoryCode: category?.code, paperCode: order.paperCode, paperChoice: order.paperChoice,
+              options: order.selOptions, sets: order.sets, memberType: order.memberType,
+              amountTotal: grandTotal, depositorName: order.depositor, shipping: order.ship,
+              designRecipe: order.designRecipe || null,
+              bundlePhone: order.bundlePhone?.trim() || null,
+            }).catch((err) => console.error("관리자 주문 기록 저장 실패:", err));
+            // 이메일 발송 실패가 주문 접수 자체를 막으면 안 되므로, 실패해도 무시하고
+            // 화면은 그대로 진행합니다 — 관리자 알림이 안 갔다고 고객의 주문을 막는 건
+            // 우선순위가 거꾸로입니다.
+            // 첨부는 둘 중 하나입니다: AI로 디자인했으면 방금 만든 인쇄용 SVG,
+            // 특별회원이면 직접 올린 파일. 이제 결제만 되면 실제 인쇄 파일이 관리자
+            // 이메일로 갑니다 — 지금까지 없던, 가장 중요한 마지막 단계입니다.
+            const attachment = order.printFileSvg
+              ? { dataUrl: svgToDataUrl(order.printFileSvg) }
+              : (order.specialOrderFile || null);
+            sendOrderNotificationEmail(order, orderNo, {
+              categoryName: category?.name, paperName: paper?.name,
+              optionsSummary: optLines.length ? optLines.join(", ") : null,
+              totalPrice: grandTotal,
+            }, attachment).catch((err) => console.error("주문 알림 이메일 발송 실패:", err));
+            go("complete");
+          }}
+        >
+          {TEXTS.paymentSubmitBtn}
+        </PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+// ==================== screens/Complete ====================
+// 2026-08-07: 서버(ORDER_PROGRESS_STAGES)와 정확히 같은 순서 — 표시용 아이콘만 여기서 따로 붙입니다.
+const STAGE_ICONS = [Check, FileText, Printer, Package, Truck, Check];
+
+function Complete({ order, go, grandTotal, category }) {
+  const orderNo = order.orderNo || "-";
+  // 2026-08-07: "고객이 보는 진행상황이 가짜 로컬 버튼"이었던 것을 실제 서버 조회로
+  // 바꿨습니다 — 관리자가 진행상황을 넘기면 이제 여기 그대로 반영됩니다. 실시간
+  // 자동 갱신은 아니라서(계속 서버를 두드리면 불필요한 트래픽), "새로고침" 버튼으로
+  // 직접 확인하는 방식입니다.
+  const [stage, setStage] = useState(0);
+  const [expectedDate, setExpectedDate] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  const refresh = async () => {
+    if (!order.orderNo) return;
+    setLoading(true);
+    try {
+      const p = await getOrderProgress(order.orderNo);
+      setStage(p.progressStage);
+      setExpectedDate(p.expectedPrintDate);
+    } catch (err) {
+      console.error("진행상황 조회 실패:", err);
+    } finally {
+      setLoading(false);
+      setLoaded(true);
+    }
+  };
+  React.useEffect(() => { refresh(); }, [order.orderNo]);
+
+  return (
+    <div className="app-body">
+      <TopBar title={TEXTS.completeTitle} step={7} />
+      <div style={{ padding: "10px 18px 16px" }}>
+        <Card style={{ textAlign: "center", padding: "22px 16px", marginBottom: 14 }}>
+          <div style={{
+            width: 54, height: 54, borderRadius: "50%", background: "var(--stamp)", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px",
+            transform: "rotate(-6deg)",
+          }}>
+            <Check size={26} />
+          </div>
+          <div className="serif" style={{ fontSize: 16, fontWeight: 900 }}>{TEXTS.completeHeadline}</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>{TEXTS.orderNoLabel} {orderNo}</div>
+          <div style={{ fontSize: 18, fontWeight: 900, color: "var(--stamp)", marginTop: 10 }}>{won(grandTotal)}</div>
+        </Card>
+
+        {order.fileStorageNotice && (
+          <div style={{
+            fontSize: 11.5, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
+            borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5,
+          }}>
+            {order.fileStorageNotice}
+          </div>
+        )}
+
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 14 }}>{TEXTS.orderStatusTitle}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", position: "relative" }}>
+            <div style={{ position: "absolute", top: 15, left: 20, right: 20, height: 1.5, background: "var(--line)" }} />
+            <div style={{ position: "absolute", top: 15, left: 20, height: 1.5, background: "var(--stamp)", width: `${(stage / (ORDER_PROGRESS_STAGES.length - 1)) * 100}%`, maxWidth: "calc(100% - 40px)" }} />
+            {ORDER_PROGRESS_STAGES.map((label, i) => {
+              const Icon = STAGE_ICONS[i];
+              const active = i <= stage;
+              return (
+                <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1, flex: 1 }}>
+                  <div style={{
+                    width: 30, height: 30, borderRadius: "50%", background: active ? "var(--stamp)" : "var(--paper-white)",
+                    border: `1.5px solid ${active ? "var(--stamp)" : "var(--line)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Icon size={14} color={active ? "#fff" : "var(--ink-soft)"} />
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: active ? "var(--ink)" : "var(--ink-soft)", textAlign: "center" }}>
+                    {label}{expectedDate && i === stage && i >= 3 ? ` (${expectedDate})` : ""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={refresh} disabled={loading} style={{ ...stepperBtn, width: "100%", marginTop: 16, fontSize: 11.5, fontWeight: 700 }}>
+            {loading ? TEXTS.orderStatusRefreshing : TEXTS.orderStatusRefreshBtn}
+          </button>
+        </Card>
+
+        <Card>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{TEXTS.orderDetailsTitle}</div>
+          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
+          <SummaryRow k={TEXTS.orderNoLabel} v={orderNo} />
+        </Card>
+      </div>
+      <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <PrimaryButton onClick={() => go("home")}>{TEXTS.goHomeBtn}</PrimaryButton>
+        <button
+          onClick={() => go("inquiry")}
+          style={{
+            width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
+            borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit",
+          }}
+        >
+          {TEXTS.inquiryBtn}
+        </button>
       </div>
     </div>
   );
@@ -7341,7 +7405,7 @@ const CATEGORY_SAMPLE_IMAGES = {
   "cat03": "data:image/jpeg;base64,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",
   "cat04": "data:image/jpeg;base64,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",
   "cat05": "data:image/jpeg;base64,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",
-  "cat06": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAcFBQYFBAcGBgYIBwcICxILCwoKCxYPEA0SGhYbGhkWGRgcICgiHB4mHhgZIzAkJiorLS4tGyIyNTEsNSgsLSz/2wBDAQcICAsJCxULCxUsHRkdLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCz/wAARCAEsAfQDASIAAhEBAxEB/8QAHAABAAIDAQEBAAAAAAAAAAAAAAQFAgMGBwEI/8QAUBAAAQMCBAIFBwYIDAUFAQAAAQACAwQRBRIhMQZBExQiUWEVMnGBkaHRByNSscHSFiQzQlSSk/A0NURTVWJjcoKisuEXJUNFg3OUwuLxdP/EABoBAQACAwEAAAAAAAAAAAAAAAABAgMEBQb/xAA0EQEAAgIBAQUFBwQCAwAAAAAAAQIDEQQhEhMxUXEFFEFSYRUiMjOBoeEjkbHRJENi8PH/2gAMAwEAAhEDEQA/APQURFuusIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiIC209PLVS9HCwvfa9gtSyjkkifnje5ju9psq27Wvu+Im+RcQ/Rne0fFPIuI/orvaPitAr6sbVMv6yGvqyNamX9Za3/I+n7q9W7yLiA/kzvaPios8EtNN0UzCx9s1jzC20VdVtx3DoxUSGOWR7ZGudcECN7vrAUziCYOrYo79oMLreF1ijkZYzRivEdfIje9KsAuIABJOwCxL2tkDCbOOwIX3ZdVP01RgLGN+ckfALAutmNu8rNyM84dT8JJnWnKOOUXsTqBYC51NltNPUNjc99NPG1psTJG5v1hZnC8WtrhzfR1qNX1ZnjwARvFnNiDXC9+XesOTmVi1YpMTsmfJR0NI2sn6IziJ580FpOZfa6hdQyNY54fm5gWWWE/xtB/e+wqXjMM01YDHG97QN2i6nJnmmetJnpJvqp3Oa0XcQBcD1lfOkZ9L3FZSRkSOhka5rgBcG4Ivsui6zVfg5BM2d3TOjBzk3N+/wAVPJ5M4oiaRuJTM+Tm+lZ9L3FBKwuDQ7U8rKQMVxoA/wDMm37+h/3V7iD2PwyN1TJIWvY0usdyba+1YsnLy4dd5XxN9dKCFkckgbJMIgTYEtuFtrqM0MzY3PDy4E6C1l9jiw98jA6WqtmGjstib6bC+9luxzN1+O9vNP1qtuXac9aV3ET5wmOsq9ZRtY+QNfIImk2zFtwEikZHNmlp3Tsy7CTIAbj7FYZKGOgbW1NM+mZ5wZJISbX0J1tbS6y8nlxh3ExPqIdZQ1FDUBsksL2G/mscHe82WlWUWIUmMSkOa4uaTZpBbm8R3+pQJ3RnpI20joyLtDumdr3Fa/G51pjsXiZsnXmkQ0TJqd0onAy+cCw6e9Qo3iRgcBodlY4bmFNOe4N39ao46yKBmSUPY4E6CF5G/eAQsuPkW95tjvP3Yj6fQ10TUXxrg5ocNiLjSy+rpIERFIIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIg+ta572saC5zjYAcypfkjEP0SX2KIxzmPa9ps5puD3FSzilc7Uzu18AsOTvf+vX6onfwY+TK79El/VTyZXfokv6qeUaz+fd7E8o1n8872BYv+T/AOP7nVOwrDJ48RZPUQOY2EOLS7vIt9RK0VdHiFVVyTOpJQ0nK0b6Db27rR5RrLflnewJ5SrNumPsCw9zn7zvOm/1Rqd7aJYpIZDHIwseNwVfYk+SPhPPCXCRlLmBbqQbKgkkfK8vebuO5UhmLV8MUcUPQuawWHSE39ynmYsmXHERG5TMbmEOWtYxuV9W4NL8o+ddqb7Xuujq3ZsAYSSSYhr36Kp8s4na3Q0e1jYH4LGfEq+pYI5GwtZ+dkvqtfJjy5bV/p61P0NS2YT/ABtT/wB77CpWNVU9PiMTYnZWOY4n0gj4qDQTCmr4pnh2VhubDwX3E6rrtc2VrS1rWkaje9vgs2fFN+RTcbj/AOoiPvbR3vfLOZXuLnusCT4K3kqGQ8JQzEksjgL3ZWlxsASbAak+hUy2xVdVTx9HDOWsBLgC29r93grcrj2vWsYo8J8EzG2pwLIy9zXhobmJynayvK0xS4RD0r3MZ0bCXAajmNFVeUsTuPx3b+zHxXxs1diDbl0s7dw5sRDT6DsfetblVzZuz24iup8dwa67Z05wt80LRiD5HFwNsgGY30HgpONPL6tpsbWVbN00V80Mocwh1nMLc1jewJ0OyzqKySuqnSuhdEALAOtc+xJxX7+lontR5rRHxYDo7/PW6L8/Ntl539SsuIWsnkja9odHplBGl/3sq0gEEEXB5FZieTouhkYyeEABrXaEeF+73rY5eK82rkpG9fBER1YMdIK6jEZGd07W692pPuBW2ua0YjcXBDCD3akFfaWZlDG5tJD0bnbufI6QjwGY6BatTqd+apFL5uRXLNezER8Ux0TqBwbS1HPbT2qrY+pmjJfUuAJNg0bD181nNiIoqWWMRSvklAy9Gwm3jcBY07XMp2NduBzWKuCMnLvN67jX+k+EbbPSbnvREXYiNdFRERSCIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICsMEc4YrG0HsvuHDkdCq9TMKlbDitO95sM1r91wsOeN47eiJ8FjjNdVUVUxlOIQC25zx3+ohQPLmJd9J+yP3lMxqlqKyaOWkEMlhlIkl6O3uN1WeS8VIuKek/92Purl4PduxHeeP6qxrSbQ43Wy4rTU84p3RzlzTkjIIIY53Mn6NvWteN6Yk3Ufk9gLc1hQYXiLMZpKiobSwwQF7nFs+dziWFoAFh9JZ4y5jq5paQ6zbEj0qtexHKr3Xh/CY1vor180E8LnxCaFr7yR3tmbY6e2x9S+ou1avaiaysldPhYGmCj9p/9l86xhvPBBpt85/9lGRafuVPOf7nT/3aXTHDKqsjp3YOIxIcod0hOtr8neC04lSQUeLMjp4hEwxOuGuJDjduupO1z7Vnh/8AG9H4S/8Axcs8ZynGW2IJEbhp6WrSnH3XKrWszoieqIiIu2LTBqWOR0lRM0OZFoAe/wAQoc2K1dVVSuEmSEEsYAbnx9Flsoa1tM18UhAjktrbY+KizUktG55ZBJLA5xe10LTIbk3ILRcjU77WXGvNbcuYz+Gum/A18U6gremf1Cdxf0jC5ubW4Frj3qBLZtTJGBly6gHuU2gpjS1HlCqHQtbGWRNdo8l1rnLuNrKC676h8rhYu8b6Jh1HKmMP4fj5ET4im4Z0c1UYZYY3joy8Et1uCPbuoS3UEwhxNuYlgdE8ZjsDdvP2+xbvMmYwWmPE1tqq8SYK2WClwxkojt2swG97bkdxWp2IVBtbCGjTX5xm/wCsso6YirqZRNEWOygXeARa+/tW4w5d5YR/5W/Fc/BbDbHE5Mk79VvDwh9oanrUFQ6agZA6AgEZgbggkG4NuSi08jpYQ92hcSfVdSIHdSjxB9TJABI5uTJJmOVrLXPcbk6fFRqUZaZgufWrcO0zybVi0zXXntG9w3IiLtIEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERB8DQ1oAvYeJWWZ30jp4r4ixd1T5Y/sbl9zG98x08SvnrRFaKVr1iDYiIrgiIgcwQSC03BG4XwNA5k+k3svqKnYrNu1rqbERFcFjFH0Gbo3yNzEk9s81kix3x0v+ONm2MkYldeQudpaxcbEeKyRFNaVp0rGgWL2NkYWPaHNO4KyRW8Rq6rBr8yzXfROrQXv0TbjwWxzgy1/znBo9JIA95ClHDqv8yJsni2RvxWtecGPpfUJ3KD1WnvfoWXvfZbQLCw2Ckuw6qaBeMG/c4FRpQYZxDICyQi4B5q1MmHeqTG/ppHWRERbAIiICIiAiIgIiICLB80cZcHyMaWgGznBt7kgWvudCtUlVIw6Uksgva7Xx793nLBfkYqT2bW1KdSkItRn6OBsk0UsN25rObew9IuFnFKyaFkrDdjwHA2toVamWl+lZiUaZIiLKCIqysx6jpKwUjntM5Djkza6GyxZMtMUbvOiI2s0VecULpBHDHHI7KHEdLawP+FRouIWnE20U0LGON7lkue1rcso7wsNeZgtOosnUrlERbaBF8e9scbnuNmtBcfQFQzcZ4VBWy0znPc6J2UuaWlpNuRv6livlpj/FOhfouffxhRNFxTVDhmy3Do7A/rKbScQ4bXVIgp53PkNv+m4AX0FzbmdFFc+O3SLQalZoiLMCIiAiIgIiICIiAiIgIiIC6mko6F1HCX0sZc5gJNt1yy+9JUgANqXNA0FmjRaXLx5bxHdImu3Vmiw4E/isfsK+Gjw4HWlj9hXJl1Sb3q5Nf6oRrqht7VTte9oK53u3L8/3R3cebrOo4cTYU0fvXzqeHDemj9i5YyVJfm6ycx3ORqxz1PKqcP8AA34J7tyvP9zsR5uqNLh4/ksXsQ0uHgXFLHb+6uU/GP0p3j2G6r4TVFoArJG27mN19ye7crz/AHOxHm6rq1CT/BI7f3VDxOjoxSOljiyOYC4FhI5c+9fcEqHVGDZpZMz45ZIsx5hriLr5icoiw2d5JFozbTwWhfLlx212usER1UEEwnizhpbZxaQe8Eg/UtijUBvSXIIJe+4PLtFSV6jFabY62n4xC9o1Mwzi6DP+MTdCzk619e5WTMHjljEkVWHMds7LoVVK04eLBQ1MUYLRDNlFzcWLWu08NVpc6+XFHbpborLCbB5YonSCohytBd2gdlVU8pmgDyACbjsm40NtFcYxI40c4BIIY46G3JUOGm+Hx3ABudvSVg4HKyZsk1vO+i2vu7Sltp6mkjLY6qEgucQ19zr3D61qWuodkp3vFrtsRfvuujyKTfHPZmYmPJELqShpMmz2k7WcqjEOhpK2GnjmlMj7Gzi0gi4Hd4roKtoikIDQGAnU8gFyGJzNdxHEBb80HXXzmrzmLkZu9rE2nxj4pr1T3ND22cLi4PrGoW3DGyw1YjbK90UgcXXI0O+lvYtalYcL17B6fqXe5mKl8VptHWIQ3vmkBcMxLraC3euXpal9RxDWNkLS6N4Gh1tkO66OqsyUgMc4Ek5tgPtK5TCWhvEOJWblvKLh247B5LzvDj+vX1X+C/QmwJ7kRevUZUs2HVsnRw1zTJa5FtNuXepfUGafjDRpfVp0VXLG04jQSl+Q9O2PMBcnNcAX9NirDEL9IxscgBboRbS/2rz3L5HI4+Ts9rf6QtqJBRg3Injyg22N1i6mAGk8ZJNgLHVchiUuIz4lHRQVbo2u7TmuAuQfNHp3WbsGxgva8YhLcfm2bYnv85Y8efmZI3Wd/p/CdQ6w07GgF1VEBpqb2WJijZlLqmIAgm9jYLkp8BxWYAOxCRwGo7DB7O1opBw+tp8NbLVCMjdwBsDY2sTz7ymTkczFG7zr9P4Oyuq+spaCgfVPqY3gNBDW3uSdgtkbi+Jrja5F9Nlx1dF0kbYrgMDm+YL6311XSsrqenjDZagMawDNdmuovYa6+lZuL7QmJnvrfsTVsrcMpMQy9Ziz5RYdoj/9VPNgk1FTscasmmLwxpucwtrY+OoVt5TpA4NdVZLi93RbD9b3qJxBiLHYG2mgvK7pS7Rts7rbAXOmipzs+DNX7n4kRtyOP4qZWSAyyNBYOwLjox3ePJd9Q/xfT3N/m2/UvJcXnkAyNLTmsLNuNRuvWaAObQQhxuQ0XWT2ZXWSfT/RKQvuV30T7EayOR7WStDo3EBwJtf1rnKiow6IvdIxrXRksEfTPBcbb78tF0OTzK8e0VmN7REbdHld9E+xVeO0VNJh0k81OwvjtlkLbObdzQdVTdbw+OPK5gLmkG/TPN/DfwXyPFcNiIMkDiXuDmhxc4tt3gm1tt1pZPaVL1ms18VojTXi9IcJrZqWN72hpLDINLDkfFVODOdLj5kebgxaEbH5xnvKY3jT62eacm8zhcF9iA76IG17KmZJ0c0UbmkB+uhsQD32XJx/dntJ29iLXZj2T7F8yu+ifYvMpseibFGGRSNDgCSZX2Nu7tXsVEfj13yuGZpGzemf6rdpdz7Sr8sqaeruZmY5r2XaRYgjQhcbxDwRQvpRNh46vMHgFrnFwkJNhck6alV/BtfLiPExEkhdHFAS1okcRcEWJudSu3xIXpGjvlj/ANYWW2SnIw2tMeG0x08HissssTXR3zSN3G+q6TgEF+L1EhuPyJOv9qFzZYetzDUODjay6jgHSunNtzCPR86FyMX46+sIjxemjZEGyL0yBERSCIiAiIgIiICIiAiIgIiICIiAiIgIi+Fwa0ucbAC5PcEF1gkZiwaxHnTyv9ryomPzhuGyNJ1d2bHme5WdNYYPSZdnsD7d99ftXOYtUipxRlEwn5m00hbr4NB9J9wK8hkib5pivxkq+RD5sHLlLruItbU6lZoi9bWvZrFY+BPUVhw867MSbfadt/2TVXqw4fzCHES0XPWG6f8Aiauf7R/J/VEsqsB12utkeLEnmEpqLDoKdrcoaL/TPMrXXPkayR4IBaCdBfkubjw+SrhZK6rlOY5yHlxufU4C3guDxseW9p7rxX8YdY4YUGk5Rp/XKwdT4dM0xuhuHCxBedQuX8i63FQ4G97gv++sJcONFE6q6zK/oBmy53i47vOW7bBzdTuZ/v8AyjUOqrZzJJfMco84hctiLbcSUpF9mglxv+cF1M0DYJS0uLspsBudFy1dK53FEDCAW2HIadoWXOwRPe135x/leFupeGG2Ix+v6lEUig/hsepG+3oXrOT+Tf0ljZ10rGS5dSXG1gd+8D1KioaCZ+LVFVExjRIRo6TzrNy72VpWymKVxZ55BDLtvbxP76rmXYxiMtQ+kw9gmZTWbNLIctydbAb+xeQxWvW8Wp4skR0dS2kqSSC2EW3+dv8AYocNUyeqqYWFjjTPDHOa64zWvbZUTqvH3PbljiazIf8AqO0PhopXDtJVUsdUaxzDJNJ0gDSXWFgNyBz5LucXk8m+WK5PD0VmulwSBW4eXbdci+tS8Sex1Qdcrb203c70bqFISKvD7AH8ch39K2Yk+QVrgG3zEDpDYABa/tWf6seiI8XMAPPGjtLRgxWsb/S3XTrloAGcWkN1zGMntX711K3/AGZ+TPqtcWeLFgwSmB53uS24bqdVgteNTdFg8Pzpj07RG9iTtfRU9q/lR6qx4uNxZ76OnfNk6O+XKXtFi5x86yTcL45WuDjicfRFoAu0XPqsoPEUzJJGtbmDnuaSCLkAEXXeU9bTz07JGSsyuAO9rerktHg4qZJnvF5nTk28I4zc5sUaQSDsNfA6LZFh1ThtJLPO/rOSV0LJXXIidYXs0b6OXW9PEP8AqM3tuqLrslTwdPJM2SITV8+XMzo3FgOVpseZDb+9Zubx8WLH2qeO1It104HG4RC1zXAscbWBaNbcyR3r1XDSThsBcADk5LyLGJYnOtEbkjMcpOngvXsPcX4dA4uzXYNe9W9m/jn0/wBJluewSRlhJAItcGxVEeC8DzOe6CTMdS8yklX6+x265T59Ig/O83to0F1vEEgD1rq5644rN7xvSImY8HOVPC2DcP03XHxPbW1QHRskd0nQN3vbbOfXZcRXVjp61tPh0D31Ejg1rWAue53dqr3inFmVtfNPK9zjfsXOjddT/ssvk8pWy1VdiLm3laRExxtdgIJdb06D1lebx1nNkj6nWIVf/DzG3hkk9RFFK46xR9oR/wB517ey6qMSwHE8CqGRVrbwuP5eM3uO+2/76r2VRcRoIMSoZKedoc1wNjbVptuF2rcCvZ1Wept4uyWPp3hwDmO01N7WV3wfg+CYrW1FLX3dI6xgYLi9rl3a7/DuuoGJ4fHhz4ctrysE8ZOlmu19guFrwqR7MUpTFKRIx4DXNJaSTv71ysd4paLTG4THjqXqeEcL4VgdS+ooYHMle3IXF19L3spuIkClaTsJY/8AWFIiLzCwyAB5aC4Da9tfeouKHLQF29nsP+YLu5KVrht2Y10n/CI6z1eOVjgyunbGy+dx1O977fv3Kfw5ircJxDppBmiL2dIW6kNa+5sOZVXVh1RVylvZ7XnHQ+pa6ehrK6oDaSF0zmgDKwbC9guBSdamPE+L0AfKbRuJEeHvfba8wbf2tVvw5xbFxHUyxQUjo2xNzOe6UH0C1hdeZ/gxjxsThk+m9wu1+TvCK3CZ8Q67A+AzNYGBwPasTddLHyM03iJ8N+RqfJ3CIi66BERAREQEREBERAW2Ckq6rOaelfK1hsSHNHK/MrUptHXijhkF9Sb2zNHLxWrystsWOb18T0ajhmJj/t0p/wDJH95fPJuK/wBFzftI/vKSeInNv2Ggjl07Nfevn4RNBGZ7Bp/PM+K5H2jm8jVvJH8m4r/Rk37SP7y++TMUt/Fsv7SP7y3DiMEOOeIai152/Fa3cRzEuLRCR/67Pin2jm8v2OzbyYeTcU/o2W/d0kf3k8m4r/Rc37SP7yzdxC8ADK0nTXpmX8eawdxHKXNaIo8tu041LN+619U+0c3kdm3k+jDcT54dKPTJH95Zx4VXSSNZJSOjY7RznPYQB6iocnE1cZbR0bSxptd1SwX961nier6UmSmYwE7CoYfXuqz7RzT4QmK28nS1r+yyKHS1mgbaDSyoKbBsQbLUS9RcHSSkud0jRnPfq7a1gL+Peor+JZw65o3FoO3WI7n3rUziev1d1Fje4GqZc+9aeLJfHftxHVPYmI6Lg4ZiA/kjv2jPitE9PUUrWungMbXnKCXtNz6AVWu4kxMte4UTM+4/Gme7VRZK3EsRrKcTxCKOKTOXGZhuLbaFb9efnm0RMEVn4rlTsCdaHErHXp2ki/8AZNUFfaGpZQvrWTSBvWHtkYToB2Qwj03HvC3vaUT3HTzViNmMynyfOG75CLW30Kh4WScNhuCDY6HfdTy5k85ZKWCFhtq4W9fvW0UGEsA0lZmuSG1T2geoGy43B5EYLzay8+GkZRMUt5Jqr7dGVaOo8KZFmHTku2Bq5NT3brSabCHy9CWyyk3uw1EjgfAtvqulf2njmsxqVYhOxRwNS4Oa4tznUW7R7lx0kssnFkLXRhrWA6tGm7d+8roMVxSIOdnmYx+wtyPMrlqSQVvFAmhJkZTta1zhcglzgL+jQ+wri4Nzlr6wvEadSpFCL1kfrUdb6O3Wm321+per5P5N/SWNHqcr55GOvqc1joHD08gubwUkcQ1zc7X2mtdp0/Jq6xKTobRsGtjmBGgB71zvDRc7G615sQ6W4Ol/yZXmeF1zV9WT4OtuURF65ja3/wALoPCsiPvUbHatjKmQg5TINyLhjQNXE9/gt1bE6WmvH+VjcJY9fzmm4/fbVcVjHFHVaxzaoOYC7V7xlOUHYX005+K4HtSlpyVnXTS1Y+KbQTmfiXpnM6KNpaBdthlF+0SuqFVTn+UQ/tG/FcNTcZYbTxy9DNFI57rOEhuXd2vdup83yk4PGwNY2BrnNBzRxN07yLrFxuXbj17EV2merq+s0/6RD+0HxUfiR7RgtOW6tyOLnixDQTuL81yg+VHD+lcW9FlDi7WNh0HLZRMT45p6+NjHSxPjDhmzEDs9wA/fROVybcisVmuuqI6SiVkkVK0SFrw1pzufKTfXQNt36KePlBdFEGgvYLhrWsaey3vHpVJSRTcW4rFR0jXSQiQOmfa7WMB1cTttovTqfD6dkEYfSwh7RbzQbd3uVOPxJzfomZcM7j+ofMAJpGRtbluAdPHbVasW4lqMWbHG52aAauLRd1+6x20XofUqUg3p4td+wFy/FtJTxYb81FDG91Q4XPZB7LdPeVfkcPuKxeZ2RO3n+Ilzn2EZa3W5DbXK9lw1rWYZTtbtkC8grg11iXZyRrYmzO4Beu4U0NwqmA+gFsezp/qT6f6RPglqNXVXVYAcucvuwNtoTlJsfYpKj11IK2jfAXZC6xDu4g3Btz1XWz0nJjtSPjCI6S8uxKoEtW8vMckYLnEMAFtdj4X3V5wFUtZitVBcjpml7WgaXFr+4LnMQM1HjEkFRG2KVpNg8aG/hz//ABaIqqSglZLGZIJozma4HW3evO4bThvEzHgtrq9nXw+afQubwjjGnrKSMVMb21WgeI2jKe4i50v3KyreKcKwemNTNK2eZvmU7Dck23d3Ae9d23LxVr2olSYlxXHUAoKqjpX5RJT0kUL8lr3ya+w81QYBTOqMZoKZtyX1Dbaa73+xRcVxObFMVkqJyHdIS5xd4m67rgLAXRReVauJzXTMLaZjh+Yd3m+1xoO8XK4OPHa8xWPinbt731ta+qhYwL4XL6W/6gpqg4ySMKltvdv+oL0WeNYrR9J/wR4vFczmzns87a8/9l13yb6YzU76xfauNztlmB5kbW007l3PydNDcWq7XN4Rr/iXBw/mV9YHoaIi9KgREQEREBERAREQEREBERARYGqo6eoibXVHV4pM3zlr2IA096uo8JpJmB8VaXsds4AEFauTlYsVuzaeqJ6KhFc+RISSBWG45ZV8ODQC96zb+qsfv+D5kdqFOitvJNOG3NWQDt2RqvgwykLg0VpJPLKE9/wfMnaqRWwwmmc6zatxtvZgWL8No42FzqxwA37IT3/B8xtVorM4dShpcasho3u0BRMQbRYfSumfUucQLtZlF3HuUfaGD5v8pR0WunlM1LFK5uUvaHFvcti3oncbgFhLGJonMJtcWva9lmiiYi0akVkmCQvc61mtNtAXj6nWUd3DMDyC6R5tt85J7POV2A5zg1kckjjrZjC4+5fTHOAD1Sqsf7B3wWhbj8Ss6tqJ9f5TuVE3henab9NMLHS00mno7SDhWjFyJJwTrcTyX/1K8yzHakqv2D/gsS6QODTS1YJ2/F3/AAUdzw/p/f8Ak6qM8I4e4drpXa37U0h/+StaKgpsPgENNBHDHfNlYLDNaxPeT6VvDpD/ACaq/wDbv+C+dI/Nl6rV3/8A5pPgr0rxcc9qsxv1OrNDUto2uqHAlsbS4gAnS3gsDI8XvS1mmv8ABpPgvj7uAa+jqiDydTP+CyZcmLJSaduOseZpx9fxFNVSSiPDq5z5NWiON1zba+nuU/hTCaujjkqqyPoJamUy9Ed425coae4m5d4etXxa0EtNFU32t1Z/wWUVRFJK6Focx7ACWPYWkD0FaHF4uKl4mLxM/RMzLaiIu0qKLPhlFVSOfNTRve4WLiL/AO1/FSkVZrFo1MCu8gYZ+iR/qj4LA8N4URY0jCPQPgrRFj7jH8sJ3Kq/BrCNfxKPX+qPgvo4cwkPzCijv/dHwVzT081VOIoWFzjqTsGjvJ5KNi9dhOCN/Gqh9XMdQxpLGNsd+zr7Tr3LUz5OPh6WiJn0R2p8IfKemipI+jhbkb3DQewLavPsR+U2Ohc6GjpaamaDYdFG0AeGvNQWfKSaxmSSobYtAc+weR6O+3M81r15/Zj7uPUev8J8fi9PXF8beUHvZDS0M9Q0OL3GMDYgD7FUx8WR08ofT3iNszgzn45djpzK6HDONoJnxx1gLM7y3pgMrAORI7txfwVrZ8XKrFL/AHeq2teDkcJ4Sx7FquKOrpnYbQ3u90pF7DWzWjUn0r1SFhjiDDYWvYN2AvoPUNFmPBFu4ONXDO48VNiIi2hT8QcNUXEVO1lReOWPzJWDtDw9C4Ku4ExyimbHTZa6I+abWyjxXpdXiVLQn597htfKxzrXva9hpsfYtHl6gtfNNYEC/V5LXPqWjnx4Mk/emIn1Wjbyw4HxBHI6F+ESlwNuwb29fct1HwbxFXygPgipso1MslvcLlekniXDGkh0swt308n3V9PEmGhwaZZgTsDBJ8Fre7YPnj9kdVJgfAFFQETV7hXzixaHttGz/B+cf72ngV1zG5GgXLjzJOpVV+FGE/pEm9vyD/gvv4S4Vlc7rDwGi5Jhfp7lt4owYvw2j+5qVqq3iFxZgNS4C5aAQN79oLR+FuCAXNbYeMb/AIL47inApoyx9U17H6EGJxB9yyXyY71mvajr9SI6vG6WKd3a6GYnc3jOnuXpnAOCVNFBNiFZGYn1FmxRuFnBg1LyOVzYAHcXKsRjHCwuR1ca2P4udfcp2GY1hNdL1XD5mlzBfI2MtAHrAWhi49IyRabxJrSzREXXQIiICIiAiIgIiICIiAiIg+OY19szWuttcXUrB4ep0boo87oRIS1p1DPAeCjKZRxukgflkyEOAva65ntKsTh7XxhMM5qt0Qkc5hIF7ADdc7RYjiGKMlmNRLF85lyMY0BtvSbnQ7q7qTJFE8GaO23ZB3VHgDS2ilucxMl81737I1uuNwcNc2Ts3W6abX0M8j2udXVnZPIs+KOpKouBFdUgi/JmvvU9F2vs3D9Vdqs0VeAcuIVIJNyW5B9uy+Oo8RzseK6oJbyswX8b33Vqg3T7Nw/U2jYVUVNXhDaiqZIHFz2tabCTsmxDhqLhReIIIosLfI85Znt2Ljp++6sqR5OBdrUZ5Ra+/bPsVZxBiLIcIczonl87OjGRt3D03+tecyVimSax5rRvSwpwRTRA6nKL+xbFpoxlooATezAPcty9jj/BHorPiIiLIhplrn0EomZG+U9G8ZWC5OrVXv4qxMuaW4ZUFtrk9G7Tx/2VpJFHK0Nkja8A3s4ArX1Om/Rof2YXK5HAnNkm/a8VtwrZuKsVjiAOGVRBbe7IjmHh6+9Q/wAKsZJzS4VVNcQbDoTt6tlfdUpv0eH9QLLq0F79BHf+4Fr/AGXPzG4ctJxRj5mcYsHrO0bXcw8uXgFi/iviAOFsFqw4O85sZsPifcuq6rT/AMxF+oE6tBa3QRfqBT9l/U7TlW8V8Rea/B6k5iWi8Z0Hq5L7+FuJRyNFbTS02clrHyts0W9P1LqeqU/6PF+oFonoaUvYerMGjz2I2k6NKx5vZ/dUm+/AiXPz8QYhBBLKGvlJadQzKxo7hzJ13UXgCpNZW4vPIbyOe3Xwsq3H8s8rhmcx1i0Bt7lWfydRhjcRs0NOdt9bkabErBwYjvaymXaoiL06giIgJle7sxgGR2jQe/ki+tmbTE1LnZeha5wJ2vYjUc91hz37vHa8fAQ+JeIYuHsNFFTTkSk/OTgi5NtT6fqC8shmxDivGm0dPOGGUl8kjj2Y2A6l3fbu5my3Y3USVlTJUTXawZtcuYanfXmVbfJlQta6vqyLOe9rG33yjU/5iPYvOYKd7eO1PWUzHwdPhnB2B4SxvRUMc8wFjUVDA+Rx5nXRvoHvXyv4OwXEWvFRSkuds4O1b6BsFeIvRRgxxGtIeTcQcKVWAyDqxMtK63RvA1B+iVStlMTywhphde7wL5fR8F7TiNLDWUL4pgS3QgjcFeSYrSMjrqiIuyCMvJ2bzAsB3rjcvFGLJqPCUut4Dx6aQ+SKt7pC1pdA61y1ovdpPd3ezuXcLyHhrOziGnMYaJInXB35jf2levnQkLo8LLN8ep+BPm+IiLfQo+IOGY8bLZmVD4Klgs03ux1r2uPXv7ivMcRp8ToukgnJBi0sLjMSdx4/Wval5n8oTnNxTVl4x2hfbN8VyefjrXV4jrMrb3Dlpq+Rkbw+MuLrADd2mnfpf7FFMeLPldamqD6tQe5fYYi+tZlBHbaQb76r3ehFqCAWt2AtXj4YyzMb0j6vDRT4y6MgUdRbloDY+BWJoMWym9DUBpvfQe3de9otz3CPm/b+To8B6jieaxw+bXllC+TRVFNG909NJFruWr39c5xuHHAW5WhxEhNjz+akVMnCilZtvwI08hjayUghwLTyH77rvPk7b0eKztHOPl61wVIAIowALWGo9C775P3WxeZt75o9fDdaWL82vrBD0RERekQIiICIiAiIgIiICIiAiIgKfROtSyC4BzaXt3KAo9TiXUHAPjzMeLjS9zz09C5/tHfcTpMRvok4jO3ojGHZBu9wbq7wCqOHhloZWm4yyWsbX81q3RYpS1U4fJLTxxuPZa7n4+jwCsJKjAnBpqaakfIRzNr29BXB4nIjBk7cwvPSNFksshLwyXZep07SdBcu1PtUeWs4ZYxzjQ0zGjYuc7Ud++i632rT5WLq3Jz3UFtTw24Oe6gpOjbYec7b2+5ZPreFoWZuqUxDhqA1ziR7VH2rT5ZW1JhNXBW8LU9XHUE08kszmPGxHSO19y5/iwGfCH5IJHZxfMCRfXYX/e6tJeI8HbSw01PFDBSMB6ONsfRtYPRsqHFsbjx2rp8OpiZJZX5GtBvk8T4AXN+S4tpm+Sbx8ZWjpHV2NKLUcIvezB9S2rCJobCxrQQAABfdZr1+PpSPRSfEREWQEREBERAREQFrk85pIJAa8n9UrYo1fN0FO5+XN2H2H+ErU5n5Fkx4vO8aLTVyFszmtPn27zsL8tla/Jvq3Eu0bCRoa23K291x1fWSy1ktppMmZxIyi1x4fau0+TSJ7sKrqtzHMZJP0bO52VoufaQuNwq6y1TMu1REXpFRERAVXxDUzUeFdPCxj8rwHBxtvoPfZWiwngjqYHwTNzxSDK5t7XCxZad5SaeZDySrqnTNLHtlk7QJFxc9+nd3Kx4NxRtDiwaSWU8zsjmi1mnYDvOtjoqvizA6zA6tzyx0lK+5aYwdr6nw8e73rnqevLXh7CW6nW1wV56tbYbb+MLb1L9BIvP+H+OTBSMixAukYzK3PbVg29a638JcDZD0suJxNAFyxrS5/hYbe9dqvMxTG5nSJjS2iMbC6abSCBplkJF7NH+9gvFsdxJtbiU8rbx3kcbFt7XPf9nium4v4/jmwl9DhhyRPcM5cbvkIH5xGnqGgXB4Vh1dxBibMMw2F1RUP7bydGRDm555ALlZ8nvGTtRHT4K7067gOgmq8RqatjbMiYI81rjM4j6gCV6edSVW4FglNw9hMWH0zzKGXc+UixkebZnejTQdwViurxMM4qdfGU7ERFuAvLflBlkbxCA2/m8rW9fivUl418pkksPE8hkjcA5oy66Fu4I8f91z+dG6R6ipoieuREkEdIPrFl7vTBxpYyRu3kNF+dBVCIAl+XmCfcQrGHiWu6PL12S9+zd7rk+o+5aXHydzabTGyLRrT3/K76J9iZXfRPsXg7+Jq8Oew1UrXtNiA52nvWQ4jxKXTrUoPLKXH7Vue/R8p0e7ZXfRPsVDxgx5wTQEWc8+ropF5CeIcYaS11ZLY63zO29qSY1jZZIxtdJklY5js3a7LtCNb8ri6pk5cXpNdeKd6a6NrnRx5buFhuu64DZlx2Q7jo9D6iuJw6J0MYDjYAaX5BejcAUU3QTYi6MiF8ghY4DziGkuPoFwPSVzsPXNXXmR0dqiIvSoEREBERAREQEREBERAREQFrlgjnAEjA7Kbi42NrLYiiYiY1IgyYLhsshe+hgN+QDh9RCw8gYVkczqEOVwsRd/3lYotX3PB8ptXDAcNBJFHCCdLjN95fPIGGnR1JE4AkgHMbf5lZInueD5Tcq7yBheXL1GG3K2fT/Mvn4PYUCSKGEXN/z/ALyskT3PB8ptUScLYPK4l+HwOzb3z6/5lLoMJocNDxSUlPBnFnGKLK4juLrkketTEVq8bFWdxUERFsgiIgIiICIiAiIgKFiuGtxWiNM+aWFjr5nROyutbkVNRUtWLx2beA5CL5NsHjdczVj9b2dNofcuqpKWGho4qSmibDBC3KyNuzR9p7zuVtRY6cfHjntVjqCIizgiIgIiIMJYY54nRysD2OFiCuLxf5M8OrJHzUEj6SR1yWg9kn0bAbrt0WLJipk/FA8hl+S7H6d0hgxCmlYzzS4OBI9Aus6f5N+I6ga11JEOefOLf5V62i1p4VJnZ0ef4X8ldMyz8WxGWpcLgx0zeib6cxuSD6l2+HYbQ4RRCjw6kjpKcHMWR/nHvcTq4+JUlFmx8fHj6xCBERbCRERAVdjGA4fj1OyHEIBK2N2ZpGhHeL9xViirMRaNSOZPyc8JuGuCxH/yyfeXz/hvwiP+yxb3/KyfeXToq93TyhDm2/J7wq1+YYPHm3v0sn3ls/AXhr+iY/2j/vLoETuqfLH9kqH8B+Gxb/lUen9o/wC8g4H4bbthUf7R/wB5XyKO6x/LH9hRs4M4eY4FuGR6G9i95B9RKumRtijZGxoaxjcrWtFg0dwA0CyRTGKlZ7URGwREWQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERAREQEREBERB//9k=",
+  "cat06": "data:image/jpeg;base64,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WVQmpqo76fLXENj7Prxwc59vKpNNRbox8f2ZOsvSfgeUZPnkRJBG8faMK0XXJvFWT17V3RUMVQiAJft7wT9RC22XmV7XbpGueTwXAkuPtyqaxueiTc2s5WCZWp7WOrnBZkVffeZA57CGNe04IDOh+dfQus8vHoA922PKtfLUew/eROhf5fAnl9wsc6R23qIpT8nZuVYNzrWktcWYPOez7l9e6NziEnYTiMSxujc4RjO13BHPq4Wm40rGtSlT1cZXM2U7XZzUs8D2ja50ce3LhgdVYKBhbTVh6jazB/7lB26J0MYDjgAcZ7grVQU7maWrK2QBrJ5o4If55blzseocfKVTWmXdU8c18yVUwqcs8maKIi74ogiIgCIiAIiIAiIgCIiAIiIAstPUS0s7ZoXbXt8QCPWCD1CxIvJRUlqyWUeptPKJgX6J5Lqiz0Ezj3tD4/qDsL33cpNjme4NFtcMEdpL+8oZFAejLRvOzXxN3SavaJkX2nBJFkogTxkPk/eXnu5TnAdZaNwBJAL5Dj+8odF55LtP7a+P1Pek1e0TPu5S7dvuHQ47sPk4/vL592qQEkWKiBJz8eX95RCJ5LtP7a+J50mr2iTkuVBK4l9hoXbuuXy8/wB5eG8OigkhoKOktzJW7ZDTR4e9vgXnJwo1Fsho+2g9aMEeOvUaw2ERFNNIREQBERAEREAREQBZ6WaOLtWy9vsljLCYZAx4+UgrAiwqU41YuE+DMoycHrIyRUNgjdk0txeM5wasc/3VsV9w88ZTwxwR0tJSs7OCCPowE5JyeSSepK00UajY0KEtenHf7TZOvOaxJhERTDSEREAREQHrXOY4OaS0joQtSe1UNS5zzG+nkd1fCcA+1p4+bC2kUevbUq6/EWTZCrOn6LIhumJ2lxhvNPtz6Imje049eMhbDdNVh29pfbewOz+cdj5mrfRVz0PRbzl/D6Ejpk8cEfNLp+yU3pXCvq7i8f8ALpI+wjP/AHuy76gpCW5bbf7nUFNDbrfncaeAH0z4vcfSefaVoopdCwoUHrRWX3mqdxOe5hERTjQEREAWOaniqGhs0bZADnDhlZEWMoRmtWSyj2MnF5RHusNsd1pG/rO+9ee9+1/yNvXPx3fepFFr6PR7C9yMtpPmzRbZLc1+4Urd3XO533rJ7m0ePxDfnP3raRedGo9he5DaT5s1/c+lGPwI49ZXgt9K3pCPnP3rZROi0OwvchtJ9p+8+KenpqeVrxTRSbfyZMlp9oyt6uuVTcXR9u9uyFuyKNjQ1kbfBrRwFqIkbelCWvGKT8A6k2sN7giIt5gEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQH/9k=",
   "cat07": "data:image/jpeg;base64,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",
   "cat08": "data:image/jpeg;base64,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",
 };
@@ -7458,12 +7522,14 @@ function PaperSelect({ order, patch, go, back, category, catPapers, paper, catOp
           )}
         </div>
 
-        {/* 상품종류 — 다른 카테고리로 바로 이동할 수 있게 홈으로 돌아가는 링크형 필드 */}
+        {/* 상품종류 — 다른 카테고리로 바로 이동할 수 있게 홈으로 돌아가는 링크형 필드.
+            안내문구는 빠른명함(cat01)만 제작·배송 속도를 강조하고, 나머지는 묶음배송
+            혜택만 보여줍니다. */}
         <DropdownField
           label={TEXTS.productTypeLabel}
           value={category?.name}
           disabled
-          hint={TEXTS.productTypeHint}
+          hint={order.catCode === "cat01" ? TEXTS.productTypeHintQuick : TEXTS.productTypeHintDefault}
         />
 
         {/* 용지 */}
@@ -7766,85 +7832,6 @@ function OptionSelect({ order, patch, go, back, category, paper, catOptions, uni
 }
 
 // stepperBtn: components/ui.js 로 이동 (Home/Auth/Complete에서도 공용으로 씀)
-
-// ==================== data/papers ====================
-const PAPERS = [
-  // 2026-08-11: recommended:true — 일반회원용 "추천 기본값"에 쓰이는 용지 표시.
-  // 카테고리에 진입했을 때 아직 아무 용지도 안 골랐으면(paperCode===null) 이 용지가
-  // 자동으로 선택됩니다(screens/Product.jsx의 useEffect 참고). 스노우지백색 계열
-  // 무광코팅을 기본 추천으로 정했고, 해당하는 용지가 없는 카테고리(cat03/04/08)는
-  // recommended가 없어 목록 첫 번째 용지로 자동 대체됩니다 — 그 3개 카테고리는
-  // 정확히 뭘 추천 기본값으로 할지 아직 확인 못 받아서 우선 안전한 기본 동작만
-  // 넣어뒀습니다.
-  // 2026-08-09: "빠른스노우250g"(pa001) 삭제 — 빠른명함 카테고리는 이제 스노우지250g,
-  // 스노우지300g 2가지 용지만 제공합니다.
-  { code: "pa002", cat: "cat01", name: "스노우지250g", sheets: 500, base: 4620, general: 14000, special: 5590, choice: "무광코팅,코팅없음", desc: "코팅없음은 넘버링가능(450매,기준가40,000원)", recommended: true, earRoundFee: 3300 },
-  { code: "pa003", cat: "cat01", name: "스노우지300g", sheets: 200, base: 4620, general: 14000, special: 5590, choice: "무광코팅,유광코팅", desc: "고급스러운 광택 옵션 선택 가능", numbering: false },
-  { code: "pa004", cat: "cat02", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 박이나 에폭시가 잘 어울림", recommended: true },
-  { code: "pa005", cat: "cat02", name: "반누보화이트204g", sheets: 200, base: 6050, general: 15000, special: 7321, desc: "부드럽고 따뜻한 질감의 고급지. 잉크가 은은하게 표현됨" },
-  { code: "pa006", cat: "cat02", name: "반누보스노우화이트227g", sheets: 200, base: 7050, general: 17000, special: 8531, desc: "반누보보다 더 밝고 깨끗한 느낌. 고급스럽고 차분함" },
-  { code: "pa007", cat: "cat02", name: "반누보화이트320g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "반누보 특유의 질감 + 두꺼운 프리미엄 느낌" },
-  { code: "pa008", cat: "cat02", name: "아르미울트라화이트230g", sheets: 300, base: 4620, general: 15000, special: 5590, desc: "무난한 기본형 고급지. 다양한 업종에 적합" },
-  { code: "pa009", cat: "cat02", name: "아르미울트라화이트310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "은은한 펄(광택) 효과가 있는 특수지. 고급스럽고 화려함" },
-  { code: "pa010", cat: "cat02", name: "엑스트라매트백색350g", sheets: 200, base: 8800, general: 19000, special: 10648, desc: "섬유 느낌이 살아있는 독특한 질감. 감성적인 분위기" },
-  { code: "pa011", cat: "cat02", name: "랑데뷰내추럴310g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "가장 인기 있는 프리미엄 고급지. 부드럽고 따뜻한 감성" },
-  { code: "pa017", cat: "cat02", name: "아쿠아사틴256g", sheets: 200, base: 17600, general: 35200, special: 21296, desc: "미세한 패턴 질감이 있는 유럽풍 고급지" },
-  { code: "pa018", cat: "cat02", name: "인버코트350g", sheets: 200, base: 18700, general: 37400, special: 22627, desc: "반짝이는 펄 효과. 조명에서 고급스럽게 빛남" },
-  { code: "pa020", cat: "cat02", name: "베이직백색233g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "매우 부드러운 촉감. 감성 브랜드·카페 스타일에 적합" },
-  { code: "pa021", cat: "cat02", name: "스타드림쿼츠240g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "골드 펄 느낌이 나는 화려한 특수지" },
-  { code: "pa022", cat: "cat02", name: "린넨커버솔라화이트216g", sheets: 200, base: 6050, general: 17000, special: 7321, desc: "매우 두꺼운 최고급지. 고급 브랜드용 추천" },
-  { code: "pa024", cat: "cat02", name: "크리스탈펄화이트235g", sheets: 200, base: 6600, general: 17000, special: 7986, desc: "검정색 특수지. 금박/은박과 조합 시 매우 고급스러움" },
-  { code: "pa025", cat: "cat02", name: "매쉬멜로우화이트209g", sheets: 200, base: 5500, general: 16000, special: 6655, desc: "물에 강한 합성지. 찢어짐과 습기에 강함" },
-  { code: "pa026", cat: "cat02", name: "다이니티골드펄250g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "친환경 크라프트 느낌. 자연주의·수제 감성", numbering: false },
-  { code: "pa027", cat: "cat02", name: "에그쉘엑스트라화이트400g", sheets: 200, base: 7700, general: 18000, special: 9317, desc: "벨벳처럼 부드러운 촉감. 최고급 감성 명함" },
-  { code: "pa028", cat: "cat03", name: "매트블랙380g", sheets: 200, base: 11000, general: 22000, special: 13310, desc: "매우 두꺼운 합지 스타일. 존재감 강함", numbering: false },
-  { code: "pa029", cat: "cat03", name: "유포지FEB250", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "푸른빛 펄 효과의 화려한 특수지", numbering: false },
-  { code: "pa030", cat: "cat03", name: "뉴크라프트보드300g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "단단하고 깔끔한 초고급 백색지" },
-  { code: "pa031", cat: "cat03", name: "벨벳화이트359g", sheets: 200, base: 9900, general: 20000, special: 11979, desc: "은은한 골드톤 특수지. 고급스러운 분위기 강조", numbering: false },
-  { code: "pa032", cat: "cat03", name: "듀오화이트400g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "물에 젖지않는 고급스러움" },
-  { code: "pa033", cat: "cat03", name: "블루펄스타250g", sheets: 200, base: 6600, general: 18000, special: 7986, desc: "느껴지는 독특한 텍스추어" },
-  { code: "pa035", cat: "cat03", name: "키칼라아이스골드250g", sheets: 200, base: 7700, general: 19000, special: 9317, desc: "최상의 멋스러움" },
-  { code: "pa036", cat: "cat03", name: "아트지백색300g", sheets: 200, base: 8800, general: 20000, special: 10648, desc: "매끄럽고 인쇄 발색이 선명한 아트지", numbering: false },
-  // 2026-08-16: 카드명함 카테고리가 원래 onlyOptions:["OPT002"]로 인쇄방식(OPT001)
-  // 선택 자체를 안 보여주고 있었습니다 — 아마 이 4개 용지가 전부 단면만 가능해서
-  // 그렇게 막아뒀던 것으로 보입니다. 이번에 카테고리 전체의 OPT001을 열면서, 이
-  // 4개 용지가 실제로 양면도 가능한지 확인 못 받아서 일단 안전하게 singleSidedOnly를
-  // 붙여 예전과 똑같이 단면만 나오게 해뒀습니다 — 양면도 가능하다면 알려주세요.
-  { code: "pa037", cat: "cat04", name: "PET투명300", sheets: 200, base: 16500, general: 33000, special: 19965, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa038", cat: "cat04", name: "Luxury카드명함화이트", sheets: 200, base: 12100, general: 24200, special: 14641, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa039", cat: "cat04", name: "Luxury카드명함실버", sheets: 200, base: 16500, general: 33000, special: 19965, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  { code: "pa040", cat: "cat04", name: "Luxury카드명함골드", sheets: 200, base: 23100, general: 46200, special: 27951, singleSidedOnly: true, desc: "네귀도리(4mm) 1~4귀 선택가능" },
-  // 2026-08-16: 카드명함(cat04) 용지 10종 추가. 사이즈는 이 카테고리 전체가 이미
-  // 86×54(작업사이즈 90×58)로 고정이라 손댈 필요 없음(FIXED_SIZE_CATEGORY 참고).
-  // 가격 공식은 기존 cat04 용지들과 동일: general=base×2, special=base×1.21.
-  // 누드·누드플러스·실버 3종은 단면인쇄만 가능(singleSidedOnly) — 인쇄방식 선택지에서
-  // "양면명함" 자체가 안 보입니다. 실버플러스·골드·골드플러스 3종은 단면/양면 가격이
-  // 같아서(추가 설정 없음) 기존 용지들과 똑같이 동작합니다. 금펄·은펄·금펄플러스·
-  // 은펄플러스 4종은 양면 선택 시 +1,200원(doubleSidePremium)이 붙습니다.
-  { code: "pa059", cat: "cat04", name: "누드", sheets: 200, base: 12760, general: 25520, special: 15440, singleSidedOnly: true, desc: "단면인쇄만 가능", noEarRound: true },
-  { code: "pa060", cat: "cat04", name: "누드플러스", sheets: 200, base: 12760, general: 25520, special: 15440, singleSidedOnly: true, desc: "단면인쇄만 가능", noEarRound: true },
-  { code: "pa061", cat: "cat04", name: "실버", sheets: 200, base: 15730, general: 31460, special: 19033, singleSidedOnly: true, desc: "단면인쇄만 가능", noEarRound: true },
-  { code: "pa062", cat: "cat04", name: "실버플러스", sheets: 200, base: 24860, general: 49720, special: 30081, desc: "단면·양면 가격 동일", noEarRound: true },
-  { code: "pa063", cat: "cat04", name: "골드", sheets: 200, base: 25410, general: 50820, special: 30746, desc: "단면·양면 가격 동일", noEarRound: true },
-  { code: "pa064", cat: "cat04", name: "골드플러스", sheets: 200, base: 29040, general: 58080, special: 35138, desc: "단면·양면 가격 동일", noEarRound: true },
-  { code: "pa065", cat: "cat04", name: "금펄", sheets: 200, base: 26620, general: 53240, special: 32210, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
-  { code: "pa066", cat: "cat04", name: "은펄", sheets: 200, base: 26620, general: 53240, special: 32210, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
-  { code: "pa067", cat: "cat04", name: "금펄플러스", sheets: 200, base: 29040, general: 58080, special: 35138, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
-  { code: "pa068", cat: "cat04", name: "은펄플러스", sheets: 200, base: 29040, general: 58080, special: 35138, doubleSidePremium: 1200, desc: "양면 선택 시 +1,200원", noEarRound: true },
-  { code: "pa041", cat: "cat05", name: "아르미울트라화이트230g", sheets: 300, base: 11000, general: 22000, special: 13310, desc: "무난한 기본형 고급지" },
-  { code: "pa043", cat: "cat05", name: "아쿠아사틴256g", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "미세한 패턴 질감의 유럽풍 고급지" },
-  { code: "pa045", cat: "cat05", name: "스노우지백색300g무광코팅", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "백색위에 에폭시가 잘 어울림", recommended: true },
-  { code: "pa047", cat: "cat05", name: "반누보화이트204g", sheets: 200, base: 10450, general: 20900, special: 12645, desc: "부드럽고 따뜻한 질감의 고급지" },
-  { code: "pa051", cat: "cat06", name: "아르미울트라화이트230g", sheets: 300, base: 12650, general: 25300, special: 15307, choice: "금박유광,금박무광,은박유광,은박무광", desc: "무난한 기본형 고급지" },
-  { code: "pa052", cat: "cat06", name: "아르미울트라화이트310g", sheets: 200, base: 13000, general: 26000, special: 15730, choice: "금박유광,금박무광,은박유광,은박무광", desc: "은은한 펄 효과. 고급스럽고 화려함" },
-  { code: "pa055", cat: "cat06", name: "스노우지백색300g무광코팅", sheets: 200, base: 15620, general: 31240, special: 18900, choice: "금박유광,금박무광,은박유광,은박무광", desc: "백색위에 박이 잘 어울림", recommended: true },
-  { code: "pa056", cat: "cat06", name: "반누보화이트204g", sheets: 200, base: 11550, general: 23100, special: 13976, choice: "금박유광,금박무광,은박유광,은박무광", desc: "부드럽고 따뜻한 질감의 고급지" },
-  // 2026-08-07: "복권명함"·"멤버십카드" 카테고리 신설에 맞춰 추가 — ⚠️ 실제 원가·
-  // 거래처가 확정되지 않아 다른 카테고리 값을 참고한 추정치입니다. 실제 주문을
-  // 받기 전에 반드시 정확한 값으로 교체해주세요.
-  { code: "pa057", cat: "cat07", name: "스노우지백색300g무광코팅(임시)", sheets: 200, base: 14520, general: 29040, special: 17569, desc: "⚠️ 임시 단가 — 긁는 코팅 실제 원가 확인 후 교체 필요", recommended: true },
-  { code: "pa058", cat: "cat08", name: "PET투명300(임시)", sheets: 200, base: 16500, general: 33000, special: 19965, desc: "⚠️ 임시 단가 — 실제 원가 확인 후 교체 필요" },
-];
 
 // ==================== App ====================
 function App() {
