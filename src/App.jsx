@@ -8179,7 +8179,19 @@ function App() {
     if (!saved?.refreshToken) return;
     (async () => {
       try {
-        await refreshSession(saved.refreshToken);
+        const result = await refreshSession(saved.refreshToken);
+        // 2026-08-31: Supabase는 refresh_token을 1회용으로 교체(rotation)합니다 —
+        // 이번에 쓴 토큰은 서버에서 즉시 폐기되고 새 토큰이 발급됩니다. 응답에 새
+        // refresh_token이 오면 반드시 저장값을 이걸로 덮어써야 합니다. 이걸 안 하면
+        // localStorage엔 이미 무효가 된 옛 토큰만 남아서, 다음 새로고침 때 서버가
+        // 거부 → catch → clearSession()으로 로그인이 풀리는 버그가 있었습니다
+        // (사용자 메타데이터는 새 응답에 없을 수 있으니 기존 saved 값을 유지합니다).
+        if (result.refresh_token) {
+          saveSession({
+            refreshToken: result.refresh_token,
+            phone: saved.phone, name: saved.name, memberType: saved.memberType,
+          });
+        }
         patch({
           authed: true, phoneVerified: true,
           phone: saved.phone || "", name: saved.name || TEXTS.defaultMemberName, memberType: saved.memberType || "general",
