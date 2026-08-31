@@ -4020,6 +4020,10 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
             // 지금은 프론트엔드 프로토타입이라 임시로 생성하고, 새로고침 전까지는 값이 바뀌지 않도록 order 상태에 저장해둡니다.
             const orderNo = `BC${Date.now().toString().slice(-8)}`;
             patch({ orderNo });
+            // 2026-08-29: 주문이 완료됐으니 저장해둔 진행상태(이어쓰기용)는 이제 필요
+            // 없습니다 — 지워두지 않으면 다음에 새로 명함을 만들려는데 방금 끝낸 주문
+            // 내용이 그대로 남아있는 채로 시작하게 됩니다.
+            clearProgress();
             // 2026-08-04: 예전에 여기 있던 window.storage 기록(orderByPhone)을 지웠습니다 —
             // Home.jsx의 "내 주문 조회"가 이제 실제 서버를 조회하므로, 이 기록을 읽는
             // 코드가 더 이상 없어서 그대로 두면 아무 효과 없이 개인정보만 남기는
@@ -7322,6 +7326,43 @@ function clearSession() {
   try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch { /* 무시 */ }
 }
 
+// 2026-08-29: 진행상태(지금 몇 번째 화면인지 + 지금까지 입력한 내용) 저장/복원.
+// 로그인 여부(세션)와는 완전히 별개입니다 — 로그인이 잘 복원돼도 "지금 화면"을
+// 저장하는 코드가 따로 없으면 새로고침할 때마다 무조건 첫 화면(home)으로 돌아가는데,
+// 실제로 이 증상이 재현됐습니다. 비밀번호(password)는 절대 저장하지 않고, 인쇄용
+// SVG처럼 결제 직전에 매번 새로 만들어지는 큰 데이터도 제외합니다 — 그 단계에
+// 다시 도달하면 어차피 다시 생성되고, base64라 용량이 커서 매번 저장하면 낭비입니다.
+const PROGRESS_STORAGE_KEY = "bizcard_progress";
+const PROGRESS_EXCLUDE_KEYS = [
+  "password", "printFileSvg", "frontSvgDraft", "logoDataUrlDraft", "logoAspectRatioDraft",
+  // 2026-08-29: authed/phoneVerified도 제외합니다 — "로그인 여부"는 오직 세션 검증
+  // (refreshSession) 결과 하나만을 진실로 삼아야 합니다. 진행상태(draft)에도 이 값을
+  // 같이 저장하면, 검증이 실패했을 때 draft 쪽의 낡은 true 값이 남아 화면과 실제
+  // 로그인 상태가 어긋나는 버그가 생깁니다(오늘 실제로 발견됨) — 그래서 인증 상태는
+  // 반드시 세션 쪽 한 곳에서만 관리합니다.
+  "authed", "phoneVerified",
+];
+function saveProgress(screen, hist, order) {
+  try {
+    const safeOrder = { ...order };
+    for (const k of PROGRESS_EXCLUDE_KEYS) delete safeOrder[k];
+    localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify({ screen, hist, order: safeOrder }));
+  } catch {
+    // 저장 실패해도(용량 초과, 시크릿모드 등) 앱 자체는 계속 정상 동작해야 합니다.
+  }
+}
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(PROGRESS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function clearProgress() {
+  try { localStorage.removeItem(PROGRESS_STORAGE_KEY); } catch { /* 무시 */ }
+}
+
 // ==================== screens/Auth ====================
 // Supabase는 국제 표준 형식(+82...)을 요구합니다 — "010-1234-5678"처럼 한국식으로
 // 입력해도 자동으로 변환해줍니다.
@@ -7987,6 +8028,7 @@ function OrderLookup({ order, patch, go }) {
         <button
           onClick={() => {
             clearSession();
+            clearProgress();
             patch({ authed: false, phoneVerified: false, name: "", phone: "", password: "" });
             go("home");
           }}
@@ -8099,14 +8141,19 @@ function OrderProgressList({ order, go }) {
 
 // ==================== App ====================
 function App() {
-  const [screen, setScreen] = useState("home");
-  const [hist, setHist] = useState([]);
+  // 2026-08-29: 새로고침해도 하던 화면 그대로 이어지도록, 저장된 진행상태가 있으면
+  // 그걸로 시작합니다(없으면 기존처럼 home에서 시작). useState에 함수를 넘기면
+  // React가 최초 렌더링 때 한 번만 이 함수를 실행합니다(매 렌더마다 localStorage를
+  // 읽지 않음).
+  const savedProgress = useMemo(() => loadProgress(), []);
+  const [screen, setScreen] = useState(() => savedProgress?.screen || "home");
+  const [hist, setHist] = useState(() => savedProgress?.hist || []);
   // 2026-08-11: 관리자가 홈 배너 문구를 바꿀 수 있는 기능 — 앱이 켜질 때 서버에 저장된
   // 오버라이드를 한 번 불러옵니다. 서버에 아직 값이 없거나(첫 배포) 요청이 실패하면
   // 빈 객체로 남아서, Home 화면은 자동으로 TEXTS 기본 문구를 보여줍니다.
   const [bannerText, setBannerText] = useState({});
   useEffect(() => { loadBannerTextOverrides().then(setBannerText); }, []);
-  const [order, setOrder] = useState({
+  const [order, setOrder] = useState(() => ({
     catCode: null, paperCode: null, paperChoice: null, sets: 1, sizeId: null, orientation: "landscape",
     selOptions: {},
     memberType: null, name: "", phone: "", phoneVerified: false, password: "", company: "", bizDoc: false, authed: false,
@@ -8116,7 +8163,8 @@ function App() {
     depositor: "",
     bundlePhone: "",
     orderNo: null,
-  });
+    ...(savedProgress?.order || {}), // 저장된 값이 있으면 기본값 위에 덮어씀(없는 필드는 기본값 유지)
+  }));
 
   // go("home")을 반복 호출해도 history가 home,home,home... 으로 계속 쌓이던 문제 수정.
   // - 같은 화면으로 다시 이동하는 경우는 무시
@@ -8137,11 +8185,22 @@ function App() {
           phone: saved.phone || "", name: saved.name || TEXTS.defaultMemberName, memberType: saved.memberType || "general",
         });
       } catch {
-        // 세션이 더 이상 유효하지 않음 — 자동로그인 실패, 로그인 화면에서 다시 시작.
+        // 2026-08-29: 세션이 더 이상 유효하지 않음 — 자동로그인 실패. clearSession()만
+        // 하면 부족했습니다 — 진행상태(order.authed)가 이전에 로그인했을 때의 값을
+        // 그대로 복원해서 이미 true로 낙관적으로 세팅돼 있을 수 있는데, 서버 검증이
+        // 실패했는데도 이 값을 명시적으로 되돌리지 않으면 "로그인 안 됐는데 로그인된
+        //것처럼 보이는" 상태가 남습니다. 반드시 false로 되돌립니다.
         clearSession();
+        patch({ authed: false, phoneVerified: false });
       }
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 2026-08-29: 화면이나 입력값이 바뀔 때마다 진행상태를 저장 — 이게 있어야 새로고침
+  // 했을 때 로그인 여부뿐 아니라 "어느 화면에서 뭘 입력하던 중이었는지"까지 이어집니다.
+  useEffect(() => {
+    saveProgress(screen, hist, order);
+  }, [screen, hist, order]);
 
   const go = (s) => {
     if (s === screen) return;
