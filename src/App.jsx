@@ -128,7 +128,6 @@ const TEXTS = {
   verifyCheckBtn: "확인",
   verifyChecking: "확인 중...",
   loggingInLabel: "로그인 중...",
-  previewSkipVerifyBtn: "⚠️ 미리보기 테스트용: 인증 건너뛰고 계속 (실 배포 시 삭제 필요)",
   verifyCodeLabel: "인증번호",
   verifyCodePlaceholder: "4자리 입력",
   verifiedStamp: "인증 완료",
@@ -7431,24 +7430,13 @@ function Auth({ order, patch, go, back }) {
                 </button>
               </div>
               {otpError && <div style={{ fontSize: 11, color: "#d64545", marginTop: 4 }}>{otpError}</div>}
-              {/* ⚠️ 미리보기 전용 임시 버튼 — 실제 배포 전에는 반드시 지워야 합니다.
-                  이 아티팩트 미리보기 환경이 외부 서버 호출(Supabase 등)을 막고 있어서
-                  실제 인증을 여기서는 확인할 수 없어, 나머지 화면(디자인·결제 등)을
-                  계속 테스트할 수 있도록 건너뛰기만 열어둔 것입니다. 실제 웹사이트로
-                  배포되면 이 CSP 제한이 없어져서 진짜 인증이 정상 작동하니, 그때는
-                  이 버튼을 지워야 합니다 — 안 지우면 아무나 인증 없이 가입할 수 있게
-                  되는 진짜 보안 구멍이 됩니다. */}
-              {otpError && (
-                <button
-                  onClick={() => patch({ phoneVerified: true })}
-                  style={{
-                    marginTop: 6, width: "100%", background: "none", border: "1.4px dashed var(--ink-soft)",
-                    borderRadius: 10, padding: "8px 0", fontSize: 11, color: "var(--ink-soft)", cursor: "pointer", fontFamily: "inherit",
-                  }}
-                >
-                  {TEXTS.previewSkipVerifyBtn}
-                </button>
-              )}
+              {/* 2026-08-29: "인증 건너뛰고 계속" 버튼(미리보기 전용 임시 버튼)을
+                  제거했습니다. 아티팩트 미리보기 환경의 외부 서버 호출 제한 때문에
+                  만들어둔 거였는데, 지금은 Render에 실제 배포된 서버라 그 제한이
+                  없습니다 — 그런데도 이 버튼이 남아있으면, 문자 인증 요청이 진짜로
+                  실패했을 때(otpError) 아무나 인증 없이 가입할 수 있는 보안 구멍이
+                  됩니다. 이제 문자 요청이 실패하면 위 otpError 메시지만 보여주고,
+                  우회로는 제공하지 않습니다. */}
             </Field>
             {code && !order.phoneVerified && (
               <Field label={TEXTS.verifyCodeLabel}>
@@ -7575,18 +7563,15 @@ function Auth({ order, patch, go, back }) {
                   });
                   go("design");
                 } catch (err) {
-                  // ⚠️ 미리보기 전용 폴백 — 실제 배포 전에는 반드시 지워야 합니다.
-                  // 이 아티팩트 미리보기 환경이 외부 서버 호출을 막고 있어서, 여기서는
-                  // 진짜 서버 응답을 못 받습니다. 대신 지금 이 세션에 남아있는
-                  // order.password와 직접 비교해서, 나머지 화면 테스트를 계속할 수
-                  // 있게만 열어둡니다 — 이건 진짜 인증이 아니라 세션 안에서만
-                  // 의미 있는 임시 비교라, 실제 배포 시엔 반드시 지워야 합니다.
-                  if (order.password && loginPasswordInput === order.password) {
-                    patch({ authed: true, memberType: order.memberType || "general", name: order.name || TEXTS.defaultMemberName });
-                    go("design");
-                  } else {
-                    setLoginError(err.message || TEXTS.loginPasswordError);
-                  }
+                  // 2026-08-29: "미리보기 전용 폴백"(order.password와 메모리에서 직접
+                  // 비교해 임시로 통과시키던 우회로)을 제거했습니다. 그 폴백은 "아티팩트
+                  // 미리보기 환경이 외부 서버 호출을 막고 있어서" 만들어둔 거였는데, 지금은
+                  // Render에 실제 배포된 서버라 그 전제 자체가 더 이상 성립하지 않습니다.
+                  // 이 상태로 남겨두면 실제 로그인이 진짜로 실패해도 화면상으로는 조용히
+                  // 성공한 것처럼 보이면서 세션(refresh_token)만 없는, 원인을 알 수 없는
+                  // 상태가 됩니다(자동로그인 점검 중 실제로 이 증상이 재현됨). 이제는
+                  // 실패하면 진짜 에러를 그대로 보여줘서 원인을 바로 알 수 있게 합니다.
+                  setLoginError(err.message || TEXTS.loginPasswordError);
                 } finally {
                   setLoggingIn(false);
                 }
