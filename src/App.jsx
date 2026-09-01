@@ -6515,7 +6515,12 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
             <div style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 16 }}>{TEXTS.companyVerifyOnceNotice}</div>
             {companyVerifyError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 10 }}>{companyVerifyError}</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <BackNextBar onBack={onStepBack} onNext={handleConfirmCode} nextLabel={TEXTS.companyVerifyCodeBtn} nextDisabled={codeInput.length !== 6} />
+              <BackNextBar
+                onBack={() => { setVerifyStage("email"); setSentCode(null); setSentAt(null); setCompanyVerifyError(""); }}
+                onNext={handleConfirmCode}
+                nextLabel={TEXTS.companyVerifyCodeBtn}
+                nextDisabled={codeInput.length !== 6}
+              />
               <Card onClick={handleSendCode}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifyResendBtn}</div>
               </Card>
