@@ -172,7 +172,7 @@ const TEXTS = {
     companyName: "회사명 입력",
     companyVerify: "회사 인증",
     fields: "정보 입력",
-    consultation: "배경 AI 상담",
+    consultation: "AI 상담",
     layout: "위치조정",
     backLayout: "뒷면디자인",
   },
@@ -188,6 +188,7 @@ const TEXTS = {
   designMethodLogoUploadDesc: "가지고 계신 로고 파일을 업로드해서 그대로 사용해요",
   logoSkipTitle: "로고 없이 진행",
   logoSkipDesc: "로고 파일이 없거나 지금 준비하기 어려우면, 로고 없이 텍스트 중심으로 완성해요",
+  logoRegenFeeNotice: "로고 재생성은 1회까지 무료이고, 그 다음부터는 재생성할 때마다 1,000원의 추가 비용이 발생해요.",
   designMethodPhoto: "기존명함 사진찍기",
   designMethodPhotoDesc: "사진 업로드 → AI 인쇄파일 변환 → 오류 확인",
   designMethodFile: "디자인파일 업로드",
@@ -396,7 +397,7 @@ const TEXTS = {
   companyVerifyCodeMismatch: "코드가 일치하지 않아요",
   companyVerifyCodeExpired: "코드가 만료됐어요 — 다시 받아주세요",
   companyAlreadyVerifiedNotice: (name) => `이전에 인증하신 ${name} 공식 로고가 자동으로 적용됐어요.`,
-  aiFieldsNextBtn: "다음: 배경 상담",
+  aiFieldsNextBtn: "다음: AI 상담",
   aiLayoutTitle: "로고 · 텍스트 위치 확인",
   aiLayoutHint: "선택하신 템플릿의 좌표 기준으로 자동 배치했어요. 모든 요소는 안전영역 안에서만 배치되어 인쇄 시 잘리지 않아요.",
   // 패턴 선택 UI (위치조정) — 드래그 대신 미리 검증된 위치 중에서 고르는 방식.
@@ -4410,6 +4411,24 @@ function interpretBackgroundInput(text) {
   };
 }
 
+// 2026-09-01: 로고 AI 생성 상담용 더미 해석 함수 — interpretBackgroundInput과 같은
+// 패턴(실제 AI/이미지생성 호출 없음, 문장 속 키워드로 스타일 라벨만 고정 매핑).
+function interpretLogoInput(text) {
+  const t = (text || "").trim();
+  let label = "심플 워드마크";
+  if (/화려|고급|골드|금색|프리미엄/.test(t)) {
+    label = "고급스러운 골드톤 심볼";
+  } else if (/귀엽|캐릭터|친근|아기자기/.test(t)) {
+    label = "귀여운 캐릭터형";
+  } else if (/미니멀|심플|깔끔/.test(t)) {
+    label = "미니멀 워드마크";
+  }
+  return {
+    target: "logo",
+    params: { label, sourceText: t },
+  };
+}
+
 // ==================== domain/recommendation/index ====================
 // Recommendation Domain — "AI가 어떻게 생각하는가". 재료(Asset)와 규칙(Kernel)을
 // 조합해서 실제로 무엇을 추천할지 계산합니다. CP-002(제안): AI는 추천할 뿐 결정하지
@@ -5218,7 +5237,16 @@ function Design({ order, patch, go, back }) {
   // 새로 마운트되며 항상 "template"(맨 처음)으로 리셋되던 것 — order(부모 상태)에는
   // 아무것도 안 남기고 있었습니다. 이제 aiSub이 바뀔 때마다 order.designResumeSub에
   // 같이 적어두고, 처음 마운트될 때 그 값이 있으면 거기서부터 다시 시작합니다.
-  const [aiSub, setAiSub] = useState(() => order.designResumeSub || "template");
+  // 2026-09-01: "companyName"/"companyVerify"/"logoMethod"/"logoType"/"logoAi"/
+  // "logoUpload"/"logoDecision"은 오늘 로고 상담 통합으로 별도 sub 화면이 아니게
+  // 됐습니다. 예전에 저장된 세션(order.designResumeSub)이 이 값들 중 하나를 들고
+  // 있으면 AiFlow에 매칭되는 화면이 없어 빈 화면이 뜨므로, 안전한 값으로 바꿔줍니다.
+  const REMOVED_AI_SUBS = new Set(["companyName", "companyVerify", "logoMethod", "logoType", "logoAi", "logoUpload", "logoDecision"]);
+  const [aiSub, setAiSub] = useState(() => {
+    const saved = order.designResumeSub;
+    if (!saved) return "template";
+    return REMOVED_AI_SUBS.has(saved) ? "fields" : saved;
+  });
   useEffect(() => {
     if (method === "ai") patch({ designResumeSub: aiSub });
   }, [aiSub, method]);
@@ -5341,7 +5369,6 @@ function Design({ order, patch, go, back }) {
 
   const handleBack = () => {
     if (method === "ai" && aiSub !== "template") {
-      const cameFromPhoto = aiTemplate === "사진형";
       if (aiSub === "backLayout") setAiSub("layout");
       // placed(확정)된 상태에서 뒤로가기를 누르면, 먼저 확정을 풀어서 위치·크기
       // 조절 화면을 다시 보여줍니다. 예전엔 placed 여부와 상관없이 바로 fields로
@@ -5349,17 +5376,10 @@ function Design({ order, patch, go, back }) {
       // 뒤엔 그 화면으로 다시 돌아올 방법이 없었기 때문입니다.
       else if (aiSub === "layout") { if (aiPlaced) setAiPlaced(false); else setAiSub("consultation"); }
       else if (aiSub === "consultation") setAiSub("fields");
-      else if (aiSub === "fields") setAiSub(wantsLogo === false ? "logoDecision" : aiLogoPath === "official" ? "companyVerify" : aiLogoPath === "upload" ? "logoUpload" : aiLogoPath === "none" ? "logoMethod" : "logoAi");
-      else if (aiSub === "logoAi") setAiSub("logoType");
-      else if (aiSub === "logoType") setAiSub("logoMethod");
-      else if (aiSub === "logoUpload") setAiSub("logoMethod");
-      else if (aiSub === "logoMethod") setAiSub("companyName");
-      else if (aiSub === "companyVerify") {
-        if (verifyStage === "code") { setVerifyStage("email"); setSentCode(null); setSentAt(null); setCompanyVerifyError(""); }
-        else setAiSub("companyName");
-      }
-      else if (aiSub === "companyName") setAiSub(cameFromPhoto ? "logoDecision" : "template");
-      else if (aiSub === "logoDecision") setAiSub("photoUpload");
+      // 2026-09-01: 로고 준비(회사 공식로고 인증/AI생성/업로드/생략)가 이제 별도
+      // sub 화면들이 아니라 "consultation" 안의 내부 단계(consultStage)로 합쳐졌기
+      // 때문에, fields의 뒤로가기는 이제 template 계열로 바로 돌아갑니다.
+      else if (aiSub === "fields") setAiSub(template === "사진형" ? "photoUpload" : "template");
       else if (aiSub === "photoUpload") setAiSub("photoTemplate");
       else if (aiSub === "photoTemplate") setAiSub("template");
       return;
@@ -6044,337 +6064,40 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
   // (실제 상담AI 연결은 3단계 이후 — 지금은 문장 속 키워드로만 고정 매핑합니다.)
   const [bgConsultInput, setBgConsultInput] = useState("");
   const [bgInterpretation, setBgInterpretation] = useState(null);
-  if (sub === "companyName") {
-    const goNext = () => {
-      const typed = fields["companyName"] || "";
-      const match = resolveCompany(typed);
-      if (!match) {
-        // 라이브러리에 없는 회사 → 기존 로고 준비 방법(AI 생성/업로드/없이 진행)으로 폴백
-        setSub("logoMethod");
-        return;
-      }
-      setCompanyMatch(match);
-      if (match.status === "pending") {
-        // 관리자 검토 전 로고 — 아직 신뢰할 수 없으니 공식 로고로 바로 쓰지 않고, 검토 중임을
-        // 안내하며 기존 로고 준비 방법(AI 생성/업로드/없이 진행)으로 폴백합니다.
-        setCompanyVerifyError(TEXTS.companyPendingNotice(match.name));
-        setSub("logoMethod");
-        return;
-      }
-      if (verifiedCompanies?.[match.id]) {
-        // 이미 인증된 회사 → 다시 묻지 않고 바로 공식 로고 적용 (1회 인증 원칙)
-        setLogoPath("official");
-        setFields((f) => ({ ...f, companyName: match.name }));
-        setSub("fields");
-      } else {
-        setSub("companyVerify");
-      }
-    };
-    return (
-      <div>
-        {/* 2026-08-01: "기본값이 단면이라 그냥 지나치는 사람이 많다"는 요청으로 추가.
-            옵션 화면에서 확인창을 한 번 띄웠지만, 여기 디자인 화면 첫 화면에서도
-            한 번 더 상기시켜서, 혹시 잘못 골랐으면 여기서라도 알아채고 되돌아갈 수
-            있게 합니다. */}
-        <div style={{
-          fontSize: 11, color: "var(--ink-soft)", background: "var(--paper-deep)",
-          borderRadius: 10, padding: "9px 12px", marginBottom: 14, lineHeight: 1.6,
-        }}>
-          ℹ️ {isDoubleSided ? TEXTS.designModeNoticeDouble : TEXTS.designModeNoticeSingle}
-        </div>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
-          {TEXTS.companyNameTitle} <span style={{ color: "var(--ink-soft)", fontWeight: 400 }}>{TEXTS.companyNameOptional}</span>
-        </div>
-        <input
-          style={{ ...inputStyle, marginBottom: 6 }}
-          placeholder={TEXTS.companyNamePlaceholder}
-          value={fields["companyName"] || ""}
-          onChange={(e) => setFields((f) => ({ ...f, companyName: e.target.value }))}
-        />
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16 }}>{TEXTS.companyNameOptionalHint}</div>
-        <BackNextBar onBack={onStepBack} onNext={goNext} nextLabel={TEXTS.companyNameNextBtn} />
-      </div>
-    );
-  }
-  if (sub === "companyVerify") {
-    const match = companyMatch;
-
-    const handleSendCode = async () => {
-      if (!verifyCompanyEmail(companyVerifyInput, match)) {
-        setCompanyVerifyError(TEXTS.companyVerifyFailTitle);
-        return;
-      }
-      setCompanyVerifyError("");
-      setCodeSending(true);
-      try {
-        const code = generateVerificationCode();
-        await sendVerificationEmail(companyVerifyInput, code);
-        setSentCode(code);
-        setSentAt(Date.now());
-        setCodeInput("");
-        setVerifyStage("code");
-      } catch (err) {
-        console.error("인증코드 발송 실패:", err);
-        setCompanyVerifyError(TEXTS.companyVerifySendFailTitle);
-      } finally {
-        setCodeSending(false);
-      }
-    };
-
-    const handleConfirmCode = () => {
-      const result = checkVerificationCode(codeInput, sentCode, sentAt);
-      if (result.ok) {
-        onVerifyCompany?.(match.id);
-        setLogoPath("official");
-        setFields((f) => ({ ...f, companyName: match.name }));
-        setCompanyVerifyError("");
-        setSub("fields");
-      } else {
-        setCompanyVerifyError(result.reason === "expired" ? TEXTS.companyVerifyCodeExpired : TEXTS.companyVerifyCodeMismatch);
-      }
-    };
-
-    if (verifyStage === "code") {
-      return (
-        <div>
-          <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.companyVerifyCodeTitle(companyVerifyInput)}</div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 16, lineHeight: 1.5 }}>{TEXTS.companyVerifyCodeDesc}</div>
-          <Field label={TEXTS.companyVerifyCodeLabel}>
-            <input
-              style={inputStyle}
-              inputMode="numeric"
-              maxLength={6}
-              placeholder={TEXTS.companyVerifyCodePlaceholder}
-              value={codeInput}
-              onChange={(e) => { setCodeInput(e.target.value.replace(/\D/g, "")); setCompanyVerifyError(""); }}
-            />
-          </Field>
-          <div style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 16 }}>{TEXTS.companyVerifyOnceNotice}</div>
-          {companyVerifyError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 10 }}>{companyVerifyError}</div>}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <BackNextBar onBack={onStepBack} onNext={handleConfirmCode} nextLabel={TEXTS.companyVerifyCodeBtn} nextDisabled={codeInput.length !== 6} />
-            <Card onClick={handleSendCode}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifyResendBtn}</div>
-            </Card>
-            <Card onClick={() => { setVerifyStage("email"); setSentCode(null); setSentAt(null); setCompanyVerifyError(""); }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifyChangeEmailBtn}</div>
-            </Card>
-          </div>
-        </div>
-      );
+  // 2026-09-01: 로고 준비(공식로고 자동인증/AI생성/업로드/생략)를 별도 sub 화면들이
+  // 아니었던 "consultation" 안의 내부 단계로 합침. consultStage가 그 내부 단계고,
+  // "logoCheck"(자동 회사매칭 확인, 화면 없음) → "companyVerify"(매칭됐지만 미인증일
+  // 때만) → "logoGate"(있음/신규/생략) → "logoUpload" 또는 "logoGen" → "background"
+  // 순서로 흐릅니다. logoRegenCount는 로고 재생성 횟수(1회 무료, 2회부터 회당 1,000원
+  // 안내) 추적용이고, logoGenInput/logoGenResult는 배경상담과 같은 더미 해석 패턴입니다.
+  const [consultStage, setConsultStage] = useState("logoCheck");
+  const [logoGenInput, setLogoGenInput] = useState("");
+  const [logoGenResult, setLogoGenResult] = useState(null);
+  const [logoRegenCount, setLogoRegenCount] = useState(0);
+  const [logoRegenNotice, setLogoRegenNotice] = useState("");
+  useEffect(() => {
+    if (sub !== "consultation" || consultStage !== "logoCheck") return;
+    const typed = fields["companyName"] || "";
+    const match = resolveCompany(typed);
+    if (!match) { setConsultStage("logoGate"); return; }
+    if (match.status === "pending") {
+      setCompanyVerifyError(TEXTS.companyPendingNotice(match.name));
+      setConsultStage("logoGate");
+      return;
     }
-
-    return (
-      <div>
-        <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.companyMatchFoundTitle(match?.name)}</div>
-        <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.5 }}>{TEXTS.companyMatchFoundDesc}</div>
-        <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, lineHeight: 1.5 }}>{TEXTS.companyVerifyPurposeNotice}</div>
-        <Field label={TEXTS.companyVerifyEmailLabel}>
-          <input
-            style={inputStyle}
-            type="email"
-            placeholder={TEXTS.companyVerifyEmailPlaceholder}
-            value={companyVerifyInput}
-            onChange={(e) => { setCompanyVerifyInput(e.target.value); setCompanyVerifyError(""); }}
-          />
-        </Field>
-        <div style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 16 }}>{TEXTS.companyVerifyOnceNotice}</div>
-        {companyVerifyError && (
-          <div style={{ fontSize: 11, color: "#d64545", marginBottom: 10 }}>
-            {companyVerifyError} — {TEXTS.companyVerifyFailDesc}
-          </div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <BackNextBar
-            onBack={onStepBack}
-            onNext={handleSendCode}
-            nextLabel={codeSending ? TEXTS.companyVerifySending : TEXTS.companyVerifyBtn}
-            nextDisabled={!companyVerifyInput || codeSending}
-          />
-          <Card onClick={() => setSub("logoMethod")}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifySkipBtn}</div>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-  if (sub === "logoMethod") {
-    const openLogoSearch = () => {
-      const q = encodeURIComponent(`${fields["companyName"] || ""} 로고`.trim());
-      window.open(`https://www.google.com/search?tbm=isch&q=${q}`, "_blank", "noopener,noreferrer");
-      setLogoPath("upload"); // 검색 후 결국 파일로 저장해서 올리는 것이므로 기존 업로드 흐름 재사용
-      setSub("logoUpload");
-    };
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {companyVerifyError && companyMatch?.status === "pending" && (
-          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", background: "rgba(108,76,240,0.06)", borderRadius: 10, padding: "10px 12px", marginBottom: 4 }}>
-            {companyVerifyError}
-          </div>
-        )}
-        <Card onClick={openLogoSearch}><MethodRow icon={Search} title={TEXTS.designMethodLogoSearch} desc={TEXTS.designMethodLogoSearchDesc} /></Card>
-        <Card onClick={() => { setLogoPath("ai"); setSub("logoType"); }}><MethodRow icon={Wand2} title={TEXTS.designMethodLogoAi} desc={TEXTS.designMethodLogoAiDesc} /></Card>
-        <Card onClick={() => { setLogoPath("upload"); setSub("logoUpload"); }}><MethodRow icon={Upload} title={TEXTS.designMethodLogoUpload} desc={TEXTS.designMethodLogoUploadDesc} /></Card>
-        <Card onClick={() => { setLogoPath("none"); setSub("fields"); }}><MethodRow icon={FileText} title={TEXTS.logoSkipTitle} desc={TEXTS.logoSkipDesc} /></Card>
-      </div>
-    );
-  }
-  if (sub === "logoUpload") {
-    return (
-      <LogoUploadStep
-        onBack={onStepBack}
-        onNext={() => setSub("fields")}
-        onExtractedColor={(hex) => setLogoColor(hex)}
-        onFileSelected={setLogoFile}
-        companyName={!companyMatch ? fields["companyName"] : null}
-        onSaveForReuse={async (file, wasAiExtracted) => {
-          const dataUrl = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-          await registerCompany({ name: fields["companyName"], logo: dataUrl, source: wasAiExtracted ? "ai_extracted" : "user_uploaded" });
-        }}
-      />
-    );
-  }
-  if (sub === "logoType") {
-    return (
-      <div>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.aiLogoTypeTitle}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-          {LOGO_TYPES.map((t) => {
-            const sel = logoType === t.id;
-            return (
-              <div key={t.id} onClick={() => setLogoType(t.id)} style={{
-                border: `1.5px solid ${sel ? "var(--stamp)" : "var(--line)"}`, borderRadius: 12,
-                padding: "12px 10px", cursor: "pointer",
-                background: sel ? "rgba(108,76,240,0.06)" : "var(--paper-white)",
-              }}>
-                {/* 2026-08-29: 로고 예시 이미지가 카드 폭을 거의 꽉 채워서 너무 커
-                    보인다는 피드백 — width를 100%에서 78%로 줄이고 가운데 정렬해
-                    카드 안에 여백이 보이도록 축소. */}
-                {LOGO_TYPE_SAMPLE_IMAGES[t.id] && (
-                  <img src={LOGO_TYPE_SAMPLE_IMAGES[t.id]} alt={t.label} style={{ width: "78%", display: "block", margin: "0 auto", aspectRatio: "1.8 / 1", objectFit: "contain", borderRadius: 6, border: "1px solid var(--line)", marginBottom: 8, background: "#fff" }} />
-                )}
-                {/* 2026-08-29: 제목이 본문(desc)과 같은 검정 계열이라 눈에 안 띈다는
-                    피드백 — 사이트 포인트색(--stamp)으로 강조. */}
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--stamp)" }}>{t.label}</div>
-                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3 }}>{t.desc}</div>
-              </div>
-            );
-          })}
-        </div>
-        <BackNextBar onBack={onStepBack} onNext={() => setSub("logoAi")} nextLabel={TEXTS.aiLogoTypeNextBtn} nextDisabled={!logoType} />
-      </div>
-    );
-  }
-  if (sub === "logoAi") {
-    const toggleConcept = (id) => {
-      setLogoConceptIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-    };
-    const setAdvanced = (key, value) => setLogoAdvanced((prev) => ({ ...prev, [key]: value }));
-    const canSubmitLogo = logoConceptIds.length > 0 || logoCustomText.trim().length > 0;
-    return (
-      <div>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.aiLogoConceptsLabel}</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-          {LOGO_CONCEPTS.map((c) => {
-            const sel = logoConceptIds.includes(c.id);
-            return (
-              <button
-                key={c.id}
-                onClick={() => toggleConcept(c.id)}
-                style={{
-                  fontSize: 12.5, padding: "8px 13px", borderRadius: 999, cursor: "pointer",
-                  border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
-                  background: sel ? "var(--stamp)" : "var(--paper-white)",
-                  color: sel ? "#fff" : "var(--ink)",
-                  fontFamily: "inherit", fontWeight: 600,
-                }}
-              >
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.aiLogoColorLabel}</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-          {LOGO_COLORS.map((c) => {
-            const sel = logoColor === c.id;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setLogoColor(c.id)}
-                style={{
-                  fontSize: 12.5, padding: "8px 13px", borderRadius: 999, cursor: "pointer",
-                  border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
-                  background: sel ? "var(--stamp)" : "var(--paper-white)",
-                  color: sel ? "#fff" : "var(--ink)",
-                  fontFamily: "inherit", fontWeight: 600,
-                }}
-              >
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <Field label={TEXTS.aiLogoCustomLabel}>
-          <textarea
-            style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}
-            placeholder={TEXTS.aiLogoCustomPlaceholder}
-            value={logoCustomText}
-            onChange={(e) => setLogoCustomText(e.target.value)}
-          />
-        </Field>
-
-        <button
-          onClick={() => setLogoAdvancedOpen((v) => !v)}
-          style={{
-            display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer",
-            fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: "var(--stamp)", padding: "4px 0", marginBottom: 10,
-          }}
-        >
-          {logoAdvancedOpen ? TEXTS.aiLogoAdvancedToggleClose : TEXTS.aiLogoAdvancedToggleOpen}
-        </button>
-
-        {logoAdvancedOpen && (
-          <Card style={{ background: "var(--paper-deep)", border: "none", marginBottom: 16 }}>
-            {LOGO_ADVANCED_GROUPS.map((group) => (
-              <div key={group.key} style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-soft)", marginBottom: 6 }}>{group.label}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {group.options.map((opt) => {
-                    const sel = logoAdvanced[group.key] === opt;
-                    return (
-                      <button
-                        key={opt}
-                        onClick={() => setAdvanced(group.key, opt)}
-                        style={{
-                          fontSize: 11, padding: "6px 10px", borderRadius: 999, cursor: "pointer",
-                          border: `1.4px solid ${sel ? "var(--stamp)" : "var(--line)"}`,
-                          background: sel ? "var(--stamp)" : "var(--paper-white)",
-                          color: sel ? "#fff" : "var(--ink)",
-                          fontFamily: "inherit", fontWeight: 600,
-                        }}
-                      >
-                        {opt}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </Card>
-        )}
-
-        <BackNextBar onBack={onStepBack} onNext={() => setSub("fields")} nextLabel={TEXTS.aiLogoSubmitBtn} nextDisabled={!canSubmitLogo} nextIcon={Wand2} />
-      </div>
-    );
-  }
+    setCompanyMatch(match);
+    if (verifiedCompanies?.[match.id]) {
+      // 이미 인증된 회사 → 다시 묻지 않고 바로 공식 로고 적용 (1회 인증 원칙)
+      setLogoPath("official");
+      setWantsLogo(true);
+      setFields((f) => ({ ...f, companyName: match.name }));
+      setConsultStage("background");
+      return;
+    }
+    setConsultStage("companyVerify");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub, consultStage]);
+  useEffect(() => { if (sub === "fields") setConsultStage("logoCheck"); }, [sub]);
   if (sub === "template") {
     const allTemplateCards = [...TEMPLATES, "사진형"];
     return (
@@ -6391,13 +6114,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
               background: isSelected ? "rgba(108,76,240,0.06)" : "var(--paper-white)",
             }}>
               <div style={{ marginBottom: 8 }}>
-                {/* 2026-08-02: 실제 샘플 사진(TEMPLATE_SAMPLE_IMAGES)을 그대로 씁니다 —
-                    "학원·병원·정치인 등 실제 예시가 들어있어도, AI가 그 텍스트를
-                    참조하지만 않으면 된다. 샘플은 레이아웃 참고용이고, 디자인
-                    작업의 핵심 참고 내용은 고객이 입력한 정보뿐이다"라고 확인
-                    받았습니다. 실제로 이 이미지는 <img>로 화면에 보여주기만 할 뿐,
-                    OCR이나 텍스트 추출을 거쳐 프롬프트나 디자인 로직에 값으로
-                    들어가는 경로 자체가 없어서 이 원칙은 구조적으로 지켜집니다. */}
                 {TEMPLATE_SAMPLE_IMAGES[t] ? (
                   <img src={TEMPLATE_SAMPLE_IMAGES[t]} alt={t} style={{ width: "100%", aspectRatio: "1.8 / 1", objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }} />
                 ) : (
@@ -6408,9 +6124,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
             </div>
             );
           })}
-          {/* "사진찍으면 캐릭터로 변환"은 아직 실제 변환 AI가 없어서, 지금은 기존
-              "사진형"과 똑같은 흐름(사진 업로드)으로 연결됩니다. 실제로 캐릭터 변환이
-              되는 것처럼 보이면 안 되니 "준비중" 표시를 남겨둡니다. */}
           <div key="캐릭터변환형" onClick={() => { setTemplate("사진형"); setCharacterCardSelected(true); }} style={{
             border: `1.5px solid ${template === "사진형" && characterCardSelected ? "var(--stamp)" : "var(--line)"}`, borderRadius: 12,
             padding: "10px 10px 12px", cursor: "pointer", textAlign: "center", position: "relative",
@@ -6428,9 +6141,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
             <div style={{ fontSize: 11.5, fontWeight: 700 }}>사진찍으면캐릭터변환형</div>
           </div>
         </div>
-        {/* 2026-08-02: 템플릿별 자유 서술 게시판 — "업종특성 맞춘 디자인 캐릭터"는
-            원하는 캐릭터를, "자유형"은 원하는 디자인 전체를 설명하도록 안내 문구가
-            다릅니다. 다른 템플릿을 고르면 이 블록 자체가 안 보입니다. */}
         {(template === "회사이름강조형" || template === "자유형") && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
@@ -6471,20 +6181,11 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
             })}
           </div>
         )}
-        {/* 2026-08-11: "가로형/세로형을 2번째 화면(용지선택)에서 전부 결정하도록
-            해달라"는 요청으로, 여기 있던 토글 UI를 없앴습니다. frontOrientation은
-            이제 order.orientation(2번째 화면에서 고른 값)을 기본값으로 시작하고,
-            사진 상단형/하단형처럼 세로가 필요한 템플릿을 고르면 여전히 자동으로
-            세로형으로 바뀝니다(위 useEffect) — 그 자동 전환 로직만 남기고 수동
-            버튼만 제거했습니다. */}
-        <BackNextBar onBack={onStepBack} onNext={() => setSub(template === "사진형" ? "photoTemplate" : "companyName")} nextLabel={TEXTS.aiTemplateNextBtn} nextDisabled={!template} />
+        <BackNextBar onBack={onStepBack} onNext={() => setSub(template === "사진형" ? "photoTemplate" : "fields")} nextLabel={TEXTS.aiTemplateNextBtn} nextDisabled={!template} />
       </div>
     );
   }
   if (sub === "photoTemplate") {
-    // 2026-08-02: "지금 가로형을 골랐으면 가로형 샘플만 보여야 한다"는 요청 반영 —
-    // frontOrientation에 따라 보여줄 목록 자체를 바꿉니다(세로형은 여전히 보류
-    // 상태라 상단형/하단형 2개만 그대로 둠).
     const variantsForOrientation = frontOrientation === "portrait" ? PHOTO_TEMPLATES_PORTRAIT : PHOTO_TEMPLATES_LANDSCAPE;
     return (
       <div>
@@ -6497,8 +6198,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
               background: photoVariant === t ? "rgba(108,76,240,0.06)" : "var(--paper-white)",
             }}>
               <div style={{ marginBottom: 8 }}>
-                {/* 2026-08-02: 위 템플릿 픽커와 같은 원칙 — 샘플 텍스트는 참조 대상이
-                    아니라 레이아웃 참고용이므로 실제 사진을 그대로 씁니다. */}
                 {PHOTO_VARIANT_SAMPLE_IMAGES[t] ? (
                   <img src={PHOTO_VARIANT_SAMPLE_IMAGES[t]} alt={t} style={{ width: "100%", aspectRatio: "1.8 / 1", objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }} />
                 ) : (
@@ -6518,32 +6217,7 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
       <div>
         <UploadBox label={TEXTS.photoUploadStepLabel} icon={Camera} done={!!photoFile} fileName={photoFile?.name} onFile={setPhotoFile} accept="image/*" />
         <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 6, marginBottom: 14 }}>{TEXTS.photoUploadStepHint}</div>
-        <BackNextBar onBack={onStepBack} onNext={() => setSub("logoDecision")} nextLabel={TEXTS.photoUploadNextBtn} nextDisabled={!photoFile} />
-      </div>
-    );
-  }
-  if (sub === "logoDecision") {
-    return (
-      <div>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{TEXTS.logoDecisionTitle}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <Card selected={wantsLogo === true} onClick={() => setWantsLogo(true)}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{TEXTS.logoDecisionYes}</div>
-            <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 3 }}>{TEXTS.logoDecisionYesDesc}</div>
-          </Card>
-          <Card selected={wantsLogo === false} onClick={() => setWantsLogo(false)}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{TEXTS.logoDecisionNo}</div>
-            <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 3 }}>{TEXTS.logoDecisionNoDesc}</div>
-          </Card>
-        </div>
-        <div style={{ marginTop: 16 }}>
-          <BackNextBar
-            onBack={onStepBack}
-            onNext={() => setSub(wantsLogo ? "companyName" : "fields")}
-            nextLabel={TEXTS.logoDecisionNextBtn}
-            nextDisabled={wantsLogo === null}
-          />
-        </div>
+        <BackNextBar onBack={onStepBack} onNext={() => setSub("fields")} nextLabel={TEXTS.photoUploadNextBtn} nextDisabled={!photoFile} />
       </div>
     );
   }
@@ -6776,13 +6450,238 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
     );
   }
   if (sub === "consultation") {
-    // 2026-09-01: (수정판) 상담은 디자인이 만들어지기 "전"에 와야 합니다 — 처음에
-    // layout 화면(CardLayoutPreview 아래)에 붙였던 건 순서가 거꾸로였습니다(이미
-    // 완성된 명함을 보여주고 나서 배경을 상담하는 꼴). 그래서 fields → consultation
-    // → layout 순서로 바꾸고, 여기서는 아직 CardLayoutPreview를 그리지 않습니다 —
-    // 승인해야 비로소 backgroundStyle이 정해지고 layout으로 넘어가 처음 디자인이
-    // 생성됩니다. interpretBackgroundInput()/state는 그대로 재사용(기능 자체는
-    // 문제 없었고 위치·역할만 잘못됐던 것).
+    // 2026-09-01: (수정판) 상담은 디자인이 만들어지기 "전"에 와야 합니다. 그리고
+    // 오늘 논의로 로고 준비(공식로고 자동인증/AI생성/업로드/생략)도 별도 sub 화면들이
+    // 아니라 이 하나의 상담 화면 안에서 순서대로(로고→배경) 진행하는 것으로 확정
+    // 했습니다. consultStage가 그 내부 단계입니다:
+    //   logoCheck(자동, 화면없음) → companyVerify(매칭됐지만 미인증일 때만)
+    //   → logoGate(있음/신규/생략) → logoUpload 또는 logoGen → background → 승인
+    // CardLayoutPreview는 끝까지 안 그립니다 — 승인해야 backgroundStyle이 정해지고
+    // layout으로 넘어가 처음 디자인이 생성됩니다.
+
+    if (consultStage === "companyVerify") {
+      // 기존 companyVerify 화면의 이메일 인증 로직을 그대로 재사용 — 회사 공식
+      // 로고 자동인증은 AI 로고생성과 무관한 별개 기능이라 로직·문구 모두 유지.
+      const match = companyMatch;
+      const handleSendCode = async () => {
+        if (!verifyCompanyEmail(companyVerifyInput, match)) {
+          setCompanyVerifyError(TEXTS.companyVerifyFailTitle);
+          return;
+        }
+        setCompanyVerifyError("");
+        setCodeSending(true);
+        try {
+          const code = generateVerificationCode();
+          await sendVerificationEmail(companyVerifyInput, code);
+          setSentCode(code);
+          setSentAt(Date.now());
+          setCodeInput("");
+          setVerifyStage("code");
+        } catch (err) {
+          console.error("인증코드 발송 실패:", err);
+          setCompanyVerifyError(TEXTS.companyVerifySendFailTitle);
+        } finally {
+          setCodeSending(false);
+        }
+      };
+      const handleConfirmCode = () => {
+        const result = checkVerificationCode(codeInput, sentCode, sentAt);
+        if (result.ok) {
+          onVerifyCompany?.(match.id);
+          setLogoPath("official");
+          setWantsLogo(true);
+          setFields((f) => ({ ...f, companyName: match.name }));
+          setCompanyVerifyError("");
+          setConsultStage("background");
+        } else {
+          setCompanyVerifyError(result.reason === "expired" ? TEXTS.companyVerifyCodeExpired : TEXTS.companyVerifyCodeMismatch);
+        }
+      };
+      if (verifyStage === "code") {
+        return (
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.companyVerifyCodeTitle(companyVerifyInput)}</div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 16, lineHeight: 1.5 }}>{TEXTS.companyVerifyCodeDesc}</div>
+            <Field label={TEXTS.companyVerifyCodeLabel}>
+              <input
+                style={inputStyle}
+                inputMode="numeric"
+                maxLength={6}
+                placeholder={TEXTS.companyVerifyCodePlaceholder}
+                value={codeInput}
+                onChange={(e) => { setCodeInput(e.target.value.replace(/\D/g, "")); setCompanyVerifyError(""); }}
+              />
+            </Field>
+            <div style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 16 }}>{TEXTS.companyVerifyOnceNotice}</div>
+            {companyVerifyError && <div style={{ fontSize: 11, color: "#d64545", marginBottom: 10 }}>{companyVerifyError}</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <BackNextBar onBack={onStepBack} onNext={handleConfirmCode} nextLabel={TEXTS.companyVerifyCodeBtn} nextDisabled={codeInput.length !== 6} />
+              <Card onClick={handleSendCode}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifyResendBtn}</div>
+              </Card>
+              <Card onClick={() => { setVerifyStage("email"); setSentCode(null); setSentAt(null); setCompanyVerifyError(""); }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifyChangeEmailBtn}</div>
+              </Card>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.companyMatchFoundTitle(match?.name)}</div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.5 }}>{TEXTS.companyMatchFoundDesc}</div>
+          <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, lineHeight: 1.5 }}>{TEXTS.companyVerifyPurposeNotice}</div>
+          <Field label={TEXTS.companyVerifyEmailLabel}>
+            <input
+              style={inputStyle}
+              type="email"
+              placeholder={TEXTS.companyVerifyEmailPlaceholder}
+              value={companyVerifyInput}
+              onChange={(e) => { setCompanyVerifyInput(e.target.value); setCompanyVerifyError(""); }}
+            />
+          </Field>
+          <div style={{ fontSize: 10.5, color: "var(--stamp)", fontWeight: 600, marginBottom: 16 }}>{TEXTS.companyVerifyOnceNotice}</div>
+          {companyVerifyError && (
+            <div style={{ fontSize: 11, color: "#d64545", marginBottom: 10 }}>
+              {companyVerifyError} — {TEXTS.companyVerifyFailDesc}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <BackNextBar
+              onBack={onStepBack}
+              onNext={handleSendCode}
+              nextLabel={codeSending ? TEXTS.companyVerifySending : TEXTS.companyVerifyBtn}
+              nextDisabled={!companyVerifyInput || codeSending}
+            />
+            <Card onClick={() => setConsultStage("logoGate")}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: "var(--ink-soft)" }}>{TEXTS.companyVerifySkipBtn}</div>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    if (consultStage === "logoGate") {
+      return (
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>로고가 있으신가요?</div>
+          {companyVerifyError && (
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", background: "rgba(108,76,240,0.06)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+              {companyVerifyError}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+            <Card onClick={() => { setLogoPath("upload"); setWantsLogo(true); setConsultStage("logoUpload"); }}>
+              <MethodRow icon={Upload} title="있어요" desc="가지고 계신 로고 파일을 올려주세요" />
+            </Card>
+            <Card onClick={() => { setLogoPath("ai"); setWantsLogo(true); setConsultStage("logoGen"); }}>
+              <MethodRow icon={Wand2} title="없어요, AI로 새로 만들래요" desc="느낌을 말씀해주시면 로고를 만들어드려요 (무료)" />
+            </Card>
+            <Card onClick={() => { setLogoPath("none"); setWantsLogo(false); setConsultStage("background"); }}>
+              <MethodRow icon={FileText} title="로고 없이 진행할게요" desc={TEXTS.logoSkipDesc} />
+            </Card>
+          </div>
+          <button
+            onClick={onStepBack}
+            style={{ width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)", borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            {TEXTS.backBtnLabel}
+          </button>
+        </div>
+      );
+    }
+
+    if (consultStage === "logoUpload") {
+      return (
+        <LogoUploadStep
+          onBack={() => setConsultStage("logoGate")}
+          onNext={() => setConsultStage("background")}
+          onExtractedColor={(hex) => setLogoColor(hex)}
+          onFileSelected={setLogoFile}
+          companyName={!companyMatch ? fields["companyName"] : null}
+          onSaveForReuse={async (file, wasAiExtracted) => {
+            const dataUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+            await registerCompany({ name: fields["companyName"], logo: dataUrl, source: wasAiExtracted ? "ai_extracted" : "user_uploaded" });
+          }}
+        />
+      );
+    }
+
+    if (consultStage === "logoGen") {
+      // 2026-09-01: 로고 AI 생성(2단계 — 더미 해석, 배경상담과 같은 패턴). 실제
+      // 이미지 생성 없이 문장을 스타일 라벨로 매핑만 합니다. 재생성 과금 안내:
+      // "1회 재요구는 무료, 2회 이상 재요구부터는 매회 추가시 1,000원"이라는 사장님
+      // 지침대로 — 최초 생성(0회)과 1번째 재생성(1회)까지는 무료, 그 다음 재생성부터
+      // (logoRegenCount가 이미 1 이상인 상태에서 또 누르면) 안내 문구를 보여줍니다.
+      return (
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>AI 로고 생성</div>
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.6, marginBottom: 10 }}>
+              원하는 로고 느낌을 말씀해주세요.
+            </div>
+
+            {logoGenResult && (
+              <div style={{ background: "var(--paper-white)", border: "1.4px solid var(--stamp)", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>이런 느낌으로 만들어봤어요.</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>로고: {logoGenResult.params.label}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => { setConsultStage("background"); }}
+                    style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    이대로 사용
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (logoRegenCount >= 1) setLogoRegenNotice(TEXTS.logoRegenFeeNotice);
+                      setLogoRegenCount((n) => n + 1);
+                      setLogoGenResult(interpretLogoInput(logoGenInput));
+                    }}
+                    style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "1.4px solid var(--line)", background: "var(--paper-white)", cursor: "pointer" }}
+                  >
+                    다시 만들기
+                  </button>
+                </div>
+              </div>
+            )}
+            {logoRegenNotice && (
+              <div style={{ fontSize: 11, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
+                {logoRegenNotice}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={logoGenInput}
+                onChange={(e) => setLogoGenInput(e.target.value)}
+                placeholder="원하는 로고 느낌을 말해주세요 (예: 심플한 미니멀 워드마크)"
+                style={{ flex: 1, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, border: "1.4px solid var(--line)" }}
+              />
+              <button
+                onClick={() => { if (logoGenInput.trim()) setLogoGenResult(interpretLogoInput(logoGenInput)); }}
+                style={{ fontSize: 12.5, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+              >
+                전송
+              </button>
+            </div>
+          </Card>
+          <button
+            onClick={() => setConsultStage("logoGate")}
+            style={{ width: "100%", background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)", borderRadius: 14, fontSize: 14, fontWeight: 700, padding: "12px 0", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            {TEXTS.backBtnLabel}
+          </button>
+        </div>
+      );
+    }
+
+    // consultStage === "background" (기본값)
     return (
       <div>
         <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>AI 배경 상담</div>
@@ -6833,7 +6732,7 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
           </div>
         </Card>
         <BackNextBar
-          onBack={onStepBack}
+          onBack={() => setConsultStage("logoGate")}
           onNext={() => setSub("layout")}
           nextLabel="상담 없이 기본값으로 진행"
         />
