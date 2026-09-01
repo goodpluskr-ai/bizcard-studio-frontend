@@ -172,6 +172,7 @@ const TEXTS = {
     companyName: "회사명 입력",
     companyVerify: "회사 인증",
     fields: "정보 입력",
+    consultation: "배경 AI 상담",
     layout: "위치조정",
     backLayout: "뒷면디자인",
   },
@@ -395,7 +396,7 @@ const TEXTS = {
   companyVerifyCodeMismatch: "코드가 일치하지 않아요",
   companyVerifyCodeExpired: "코드가 만료됐어요 — 다시 받아주세요",
   companyAlreadyVerifiedNotice: (name) => `이전에 인증하신 ${name} 공식 로고가 자동으로 적용됐어요.`,
-  aiFieldsNextBtn: "다음: 위치 조정",
+  aiFieldsNextBtn: "다음: 배경 상담",
   aiLayoutTitle: "로고 · 텍스트 위치 확인",
   aiLayoutHint: "선택하신 템플릿의 좌표 기준으로 자동 배치했어요. 모든 요소는 안전영역 안에서만 배치되어 인쇄 시 잘리지 않아요.",
   // 패턴 선택 UI (위치조정) — 드래그 대신 미리 검증된 위치 중에서 고르는 방식.
@@ -5346,7 +5347,8 @@ function Design({ order, patch, go, back }) {
       // 조절 화면을 다시 보여줍니다. 예전엔 placed 여부와 상관없이 바로 fields로
       // 가버려서, "위치조정 화면을 건너뛴다"는 문제가 있었습니다 — 한 번 확정한
       // 뒤엔 그 화면으로 다시 돌아올 방법이 없었기 때문입니다.
-      else if (aiSub === "layout") { if (aiPlaced) setAiPlaced(false); else setAiSub("fields"); }
+      else if (aiSub === "layout") { if (aiPlaced) setAiPlaced(false); else setAiSub("consultation"); }
+      else if (aiSub === "consultation") setAiSub("fields");
       else if (aiSub === "fields") setAiSub(wantsLogo === false ? "logoDecision" : aiLogoPath === "official" ? "companyVerify" : aiLogoPath === "upload" ? "logoUpload" : aiLogoPath === "none" ? "logoMethod" : "logoAi");
       else if (aiSub === "logoAi") setAiSub("logoType");
       else if (aiSub === "logoType") setAiSub("logoMethod");
@@ -6769,7 +6771,72 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
           )}
         </Card>
 
-        <BackNextBar onBack={onStepBack} onNext={() => setSub("layout")} nextLabel={TEXTS.aiFieldsNextBtn} />
+        <BackNextBar onBack={onStepBack} onNext={() => setSub("consultation")} nextLabel={TEXTS.aiFieldsNextBtn} />
+      </div>
+    );
+  }
+  if (sub === "consultation") {
+    // 2026-09-01: (수정판) 상담은 디자인이 만들어지기 "전"에 와야 합니다 — 처음에
+    // layout 화면(CardLayoutPreview 아래)에 붙였던 건 순서가 거꾸로였습니다(이미
+    // 완성된 명함을 보여주고 나서 배경을 상담하는 꼴). 그래서 fields → consultation
+    // → layout 순서로 바꾸고, 여기서는 아직 CardLayoutPreview를 그리지 않습니다 —
+    // 승인해야 비로소 backgroundStyle이 정해지고 layout으로 넘어가 처음 디자인이
+    // 생성됩니다. interpretBackgroundInput()/state는 그대로 재사용(기능 자체는
+    // 문제 없었고 위치·역할만 잘못됐던 것).
+    return (
+      <div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>AI 배경 상담</div>
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.6, marginBottom: 10 }}>
+            원하는 배경 느낌을 말씀해주시면, 그 느낌으로 명함 디자인을 처음 만들어드릴게요.
+          </div>
+
+          {bgInterpretation && (
+            <div style={{ background: "var(--paper-white)", border: "1.4px solid var(--stamp)", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>이렇게 이해했어요. 확인해주세요.</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>배경: {bgInterpretation.params.label}</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    setBackgroundStyle(bgInterpretation.params.backgroundStyleId);
+                    setBgInterpretation(null);
+                    setBgConsultInput("");
+                    setSub("layout");
+                  }}
+                  style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+                >
+                  이대로 디자인 시작
+                </button>
+                <button
+                  onClick={() => setBgInterpretation(null)}
+                  style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "1.4px solid var(--line)", background: "var(--paper-white)", cursor: "pointer" }}
+                >
+                  다시 설명할게요
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              value={bgConsultInput}
+              onChange={(e) => setBgConsultInput(e.target.value)}
+              placeholder="원하는 배경 느낌을 말해주세요 (예: 차분한 파란색 그라데이션)"
+              style={{ flex: 1, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, border: "1.4px solid var(--line)" }}
+            />
+            <button
+              onClick={() => { if (bgConsultInput.trim()) setBgInterpretation(interpretBackgroundInput(bgConsultInput)); }}
+              style={{ fontSize: 12.5, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+            >
+              전송
+            </button>
+          </div>
+        </Card>
+        <BackNextBar
+          onBack={onStepBack}
+          onNext={() => setSub("layout")}
+          nextLabel="상담 없이 기본값으로 진행"
+        />
       </div>
     );
   }
@@ -6878,57 +6945,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", margin: "10px 0", fontSize: 10, color: "var(--ink-soft)" }}>
           <span>┄ {TEXTS.legendSafeArea}</span>
         </div>
-
-        {/* 2026-09-01: 배경 AI 상담 패널(2단계 — 더미 해석, ConsultationPanel mode="BACKGROUND").
-            흐름: 입력 → interpretBackgroundInput()(임시 interpretation state) → 확인카드
-            → 승인 시에만 setBackgroundStyle()로 흘려보냄(재설명은 interpretation만 지움,
-            backgroundStyle은 승인 전까지 절대 안 건드림) → CardLayoutPreview가 다시 그림.
-            중간에 새 "approvedBackground" 같은 state를 따로 두지 않고, 기존
-            backgroundStyle/setBackgroundStyle을 그대로 렌더링 소스로 씀. */}
-        <div style={{ background: "var(--paper-deep)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
-          <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 8 }}>배경 AI 상담 (베타)</div>
-
-          {bgInterpretation && (
-            <div style={{ background: "var(--paper-white)", border: "1.4px solid var(--stamp)", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
-              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>이렇게 이해했어요. 확인해주세요.</div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>배경: {bgInterpretation.params.label}</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  onClick={() => {
-                    setBackgroundStyle(bgInterpretation.params.backgroundStyleId);
-                    setBgInterpretation(null);
-                    setBgConsultInput("");
-                  }}
-                  style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
-                >
-                  이대로 적용
-                </button>
-                <button
-                  onClick={() => setBgInterpretation(null)}
-                  style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "1.4px solid var(--line)", background: "var(--paper-white)", cursor: "pointer" }}
-                >
-                  다시 설명할게요
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 6 }}>
-            <input
-              value={bgConsultInput}
-              onChange={(e) => setBgConsultInput(e.target.value)}
-              placeholder="원하는 배경 느낌을 말해주세요 (예: 차분한 파란색 그라데이션)"
-              style={{ flex: 1, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, border: "1.4px solid var(--line)" }}
-            />
-            <button
-              onClick={() => { if (bgConsultInput.trim()) setBgInterpretation(interpretBackgroundInput(bgConsultInput)); }}
-              style={{ fontSize: 12.5, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
-            >
-              전송
-            </button>
-          </div>
-        </div>
-
         {!cpCheck.pass && (
           <div style={{
             fontSize: 11, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
