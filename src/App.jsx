@@ -4382,6 +4382,33 @@ async function generateBackgroundOptions(industry, styleTags = [], colorId = nul
   return response;
 }
 
+// ==================== domain/consultation/interpretBackgroundInput (2단계, 더미) ====================
+// 2026-09-01: "AI 디자인 화면에서 배경 한 종류에 대해 E2E 관통을 증명한다"는
+// 2단계 목표용 더미 함수입니다. 실제 상담AI(3단계 이후)를 대신해서, 문장 속
+// 키워드만 보고 BACKGROUND_STYLE_OPTIONS(8340줄 부근)에 이미 있는 id 중 하나로
+// 고정 매핑합니다. 반환형은 "정식 명령 규격"이 아니라 "운반용 봉투" —
+// { target, params } 얇은 구조만 지키고, params 안쪽은 3단계에서 PHOTO_MODE/
+// BACKGROUND_TYPE 등이 추가되며 계속 늘어날 수 있는 임시 필드입니다.
+function interpretBackgroundInput(text) {
+  const t = (text || "").trim();
+  let backgroundStyleId = "soft";
+  let label = "소프트 컬러 (기본값)";
+  if (/그라데이션|그라디언트|화려|고급/.test(t)) {
+    backgroundStyleId = "gradient";
+    label = "그라데이션";
+  } else if (/화이트|하양|심플|깔끔|미니멀/.test(t)) {
+    backgroundStyleId = "white";
+    label = "화이트";
+  } else if (/차분|부드럽|은은|파스텔/.test(t)) {
+    backgroundStyleId = "soft";
+    label = "소프트 컬러 (차분한 느낌)";
+  }
+  return {
+    target: "background",
+    params: { backgroundStyleId, label, sourceText: t },
+  };
+}
+
 // ==================== domain/recommendation/index ====================
 // Recommendation Domain — "AI가 어떻게 생각하는가". 재료(Asset)와 규칙(Kernel)을
 // 조합해서 실제로 무엇을 추천할지 계산합니다. CP-002(제안): AI는 추천할 뿐 결정하지
@@ -6008,6 +6035,13 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
   // 합니다(Hooks 규칙) — 그래서 이 함수의 여러 분기 return들보다 위, 맨 앞에 둡니다.
   const [adjustStepIndex, setAdjustStepIndex] = useState(0);
   useEffect(() => { setAdjustStepIndex(0); }, [template]);
+  // 2026-09-01: "AI 디자인 2단계 — 더미 데이터 E2E 관통"용. bgConsultInput은 상담창에
+  // 고객이 입력 중인 문장, bgInterpretation은 아직 승인 전인 "임시 해석 결과"입니다.
+  // 승인 전까지는 이 state만 바뀌고 실제 배경(backgroundStyle)에는 손대지 않습니다 —
+  // 승인 버튼을 눌러야 setBackgroundStyle()로 흘려보내서 CardLayoutPreview가 바뀝니다.
+  // (실제 상담AI 연결은 3단계 이후 — 지금은 문장 속 키워드로만 고정 매핑합니다.)
+  const [bgConsultInput, setBgConsultInput] = useState("");
+  const [bgInterpretation, setBgInterpretation] = useState(null);
   if (sub === "companyName") {
     const goNext = () => {
       const typed = fields["companyName"] || "";
@@ -6844,6 +6878,57 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", margin: "10px 0", fontSize: 10, color: "var(--ink-soft)" }}>
           <span>┄ {TEXTS.legendSafeArea}</span>
         </div>
+
+        {/* 2026-09-01: 배경 AI 상담 패널(2단계 — 더미 해석, ConsultationPanel mode="BACKGROUND").
+            흐름: 입력 → interpretBackgroundInput()(임시 interpretation state) → 확인카드
+            → 승인 시에만 setBackgroundStyle()로 흘려보냄(재설명은 interpretation만 지움,
+            backgroundStyle은 승인 전까지 절대 안 건드림) → CardLayoutPreview가 다시 그림.
+            중간에 새 "approvedBackground" 같은 state를 따로 두지 않고, 기존
+            backgroundStyle/setBackgroundStyle을 그대로 렌더링 소스로 씀. */}
+        <div style={{ background: "var(--paper-deep)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 8 }}>배경 AI 상담 (베타)</div>
+
+          {bgInterpretation && (
+            <div style={{ background: "var(--paper-white)", border: "1.4px solid var(--stamp)", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>이렇게 이해했어요. 확인해주세요.</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>배경: {bgInterpretation.params.label}</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    setBackgroundStyle(bgInterpretation.params.backgroundStyleId);
+                    setBgInterpretation(null);
+                    setBgConsultInput("");
+                  }}
+                  style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+                >
+                  이대로 적용
+                </button>
+                <button
+                  onClick={() => setBgInterpretation(null)}
+                  style={{ flex: 1, fontSize: 12, padding: "7px 0", borderRadius: 8, border: "1.4px solid var(--line)", background: "var(--paper-white)", cursor: "pointer" }}
+                >
+                  다시 설명할게요
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              value={bgConsultInput}
+              onChange={(e) => setBgConsultInput(e.target.value)}
+              placeholder="원하는 배경 느낌을 말해주세요 (예: 차분한 파란색 그라데이션)"
+              style={{ flex: 1, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, border: "1.4px solid var(--line)" }}
+            />
+            <button
+              onClick={() => { if (bgConsultInput.trim()) setBgInterpretation(interpretBackgroundInput(bgConsultInput)); }}
+              style={{ fontSize: 12.5, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--stamp)", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+            >
+              전송
+            </button>
+          </div>
+        </div>
+
         {!cpCheck.pass && (
           <div style={{
             fontSize: 11, color: "#B45309", background: "#FEF3C7", border: "1px solid #FDE68A",
