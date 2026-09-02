@@ -6101,11 +6101,6 @@ function AiFlow({ go, patch, order, sub, setSub, template, setTemplate, fields, 
     const allTemplateCards = [...TEMPLATES, "사진형"];
     return (
       <div>
-        {/* 2026-09-01: 배포 파이프라인(GitHub 업로드→Render 재배포→브라우저) 자체가
-            실제로 작동하는지 확인하기 위한 임시 표시입니다 — 확인되면 바로 지웁니다. */}
-        <div style={{ background: "#FF3B30", color: "#fff", fontWeight: 900, fontSize: 16, textAlign: "center", padding: "10px 0", borderRadius: 8, marginBottom: 12 }}>
-          🔴 배포테스트 0901-A 🔴
-        </div>
         <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{TEXTS.aiTemplatePickTitle}</div>
         <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 12 }}>{TEXTS.aiTemplatePickDesc}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
