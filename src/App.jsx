@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Award, Camera, Check, CreditCard, Crown, FileText, Gem, Gift, Globe, Home as HomeIcon, Landmark, Mail, MapPin, Package, PackageSearch, Phone, Printer, Search, Settings, Star, Truck, Upload, User, UserCircle2, Wand2, X, Zap } from "lucide-react";
-import { LOGO_TYPE_SAMPLE_IMAGES } from "./domain/asset/logoTypeSampleImages";
 
 // ==================== constants/texts ====================
 const TEXTS = {
