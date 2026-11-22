@@ -7434,97 +7434,33 @@ async function cardScanAnalyze(img, guide, manualCorners = null, opts = {}) {
 }
 
 // ---- 카메라 촬영 화면 (가이드 사각형) ----
-function CardCameraCapture({ onCaptured, onUseFile }) {
-  const videoRef = useRef(null), streamRef = useRef(null), fileRef = useRef(null);
-  const [state, setState] = useState("starting"); // starting | live | denied
-  const [hint, setHint] = useState(null); // null | "searching" | "good"
-  const [frame, setFrame] = useState({ w: 16, h: 9 });
-
-  useEffect(() => {
-    let stop = false;
-    (async () => {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false });
-        if (stop) { s.getTracks().forEach((t) => t.stop()); return; }
-        streamRef.current = s;
-        const v = videoRef.current; v.srcObject = s; await v.play();
-        setFrame({ w: v.videoWidth, h: v.videoHeight });
-        setState("live");
-      } catch { setState("denied"); }
-    })();
-    return () => { stop = true; streamRef.current?.getTracks().forEach((t) => t.stop()); };
-  }, []);
-
-  // 화면을 보면서 0.8초마다 가볍게 검사 → 가이드 색으로 알려줌
-  useEffect(() => {
-    if (state !== "live") return;
-    let busy = false;
-    const id = setInterval(async () => {
-      const v = videoRef.current; if (!v || busy || !v.videoWidth) return;
-      busy = true;
-      try {
-        const img = await cardScanLoadImage(v, 640);
-        const det = CardScan.detectCard(img, CardScan.defaultGuide(img.width, img.height), { maxSide: 480, perSide: 4 });
-        setHint(det.ok && Math.min(...det.coverage) >= 0.75 ? "good" : "searching");
-      } catch { /* 다음 차례에 다시 */ }
-      busy = false;
-    }, 800);
-    return () => clearInterval(id);
-  }, [state]);
-
-  const [shooting, setShooting] = useState(false);
-  const shoot = async () => {
-    const v = videoRef.current; if (!v || shooting) return;
-    setShooting(true); // 누르자마자 '찍는 중' 표시 (큰 사진을 읽는 동안 반응 없는 것처럼 보이지 않게)
-    await new Promise((r) => setTimeout(r, 30));
-    let img;
-    try { img = await cardScanLoadImage(v, 3200); } catch { setShooting(false); return; }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    onCaptured(img, CardScan.defaultGuide(img.width, img.height));
-  };
-
-  const g = CardScan.defaultGuide(frame.w, frame.h);
-  const stroke = hint === "good" ? "#2EAD5B" : "#FFFFFF";
+function CardCameraCapture({ onUseFile }) {
+  // 2026-11-22 — 휴대폰 원래 카메라 앱으로 찍음 (자동 초점·최고 화질·화면 전체).
+  // 정확도는 찍은 뒤 '모서리 맞추기'에서 확인하므로, 찍기 전 화면 속 가이드는 두지 않음
   const [dragOver, setDragOver] = useState(false);
+  const pick = (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onUseFile(f); };
+  const btn = { position: "relative", overflow: "hidden", borderRadius: 10, padding: "13px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
+  const cover = { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" };
   return (
     <div style={{ marginBottom: 14, position: "relative" }}
-      // 컴퓨터에서는 스캔 파일을 이 화면으로 끌어다 놓아도 됨
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) onUseFile(f); }}>
       {dragOver && <div style={{ position: "absolute", inset: 0, zIndex: 5, borderRadius: 12, border: "3px dashed var(--stamp)", background: "rgba(108,76,240,0.12)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "var(--stamp)" }}>여기에 놓으면 올라가요</div>}
-      {state !== "denied" ? (
-        <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#111", aspectRatio: `${frame.w} / ${frame.h}` }}>
-          <video ref={videoRef} playsInline muted style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }} />
-          <svg viewBox={`0 0 ${frame.w} ${frame.h}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
-            <path fillRule="evenodd" fill="rgba(0,0,0,0.45)"
-              d={`M0 0H${frame.w}V${frame.h}H0Z M${g[0][0]} ${g[0][1]}H${g[1][0]}V${g[2][1]}H${g[0][0]}Z`} />
-            <rect x={g[0][0]} y={g[0][1]} width={g[1][0] - g[0][0]} height={g[2][1] - g[0][1]} fill="none" stroke={stroke}
-              strokeWidth={Math.max(frame.w, frame.h) * 0.004} strokeDasharray={hint === "good" ? "none" : `${frame.w * 0.02} ${frame.w * 0.012}`} rx={frame.w * 0.01} />
-          </svg>
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 8, textAlign: "center", color: "#fff", fontSize: 12, fontWeight: 600, textShadow: "0 1px 3px rgba(0,0,0,.8)" }}>
-            {state === "starting" ? "카메라를 켜는 중…" : hint === "good" ? "좋아요! 지금 찍으세요" : "명함을 사각형 안에 맞춰 주세요"}
-          </div>
-        </div>
-      ) : (
-        <div style={{ padding: "18px 14px", borderRadius: 12, background: "var(--paper-deep)", fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.7 }}>
-          카메라를 열 수 없어요. 휴대폰 카메라로 명함을 찍은 뒤 사진을 올려 주세요.
-          <br />네 모서리가 모두 보이게, 바로 위에서 찍어 주세요.
-        </div>
-      )}
+      <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--paper-deep)", fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.75 }}>
+        <b style={{ color: "var(--ink)" }}>이렇게 찍어 주세요</b><br />
+        · 어두운 바탕 위에 명함을 놓고, 바로 위에서<br />
+        · 네 모서리가 모두 보이게 (너무 가까우면 초점이 안 맞아요 — 한 뼘 정도 떨어져서)<br />
+        · 화면을 한 번 눌러 초점을 맞춘 뒤 찍기
+      </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        {state === "live" && (
-          <button onClick={shoot} style={{ flex: 2, background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 10, padding: "12px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            <Camera size={16} /> {shooting ? "찍는 중…" : "촬영하기"}
-          </button>
-        )}
-        {/* 2026-11-22 — 숨긴 입력을 코드로 누르는 방식은 앱 속 화면(웹뷰)에서 막히는 일이 있어,
-            고객이 직접 누르는 <label> 안에 파일 입력을 둠 (휴대폰에서는 '사진 찍기/사진 보관함'이 뜸) */}
-        <label style={{ flex: 1, position: "relative", background: "var(--paper-deep)", border: "1.5px dashed var(--line)", color: "var(--ink-soft)", borderRadius: 10, padding: "12px 0", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, overflow: "hidden" }}>
+        <label style={{ ...btn, flex: 2, background: "var(--stamp)", color: "#fff" }}>
+          <Camera size={16} /> 사진 찍기
+          <input type="file" accept="image/*" capture="environment" aria-label="명함 사진 찍기" style={cover} onChange={pick} />
+        </label>
+        <label style={{ ...btn, flex: 1, background: "var(--paper-deep)", border: "1.5px dashed var(--line)", color: "var(--ink-soft)", fontSize: 12.5, fontWeight: 600 }}>
           <Upload size={15} /> 사진·스캔 파일 올리기
-          <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" aria-label="명함 사진 올리기"
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
-            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onUseFile(f); }} />
+          <input type="file" accept="image/*,application/pdf,.pdf" aria-label="명함 사진 올리기" style={cover} onChange={pick} />
         </label>
       </div>
       <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.6 }}>
@@ -10991,7 +10927,6 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         return (
           <>
             <CardCameraCapture
-              onCaptured={(img, guide) => startScan(img, guide, null)}
               onUseFile={async (f) => {
                 setCardScanBusy(true);
                 try { const img = await cardScanLoadImage(f); startScan(img, null, img.pdf ? null : f); } // PDF는 그림으로 바꾼 것을 씀
