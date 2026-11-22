@@ -1308,16 +1308,36 @@ function SummaryRow({ k, v }) {
   );
 }
 
+// 2026-11-22 — 고효율 사진(HEIF/HEIC, 갤럭시 '고효율 사진'·아이폰 기본) 읽기.
+// 형식은 공개 표준이지만 크롬은 HEVC 특허료 문제로 직접 읽지 않음 → 앱이 libheif(heic-to)로 풀어서 JPG로 바꿔 씀.
+// 이 형식일 때만 변환 모듈을 불러옴 (다른 사진은 영향 없음). 앱의 모든 사진 올리기에서 이 함수를 거침
+async function isHeifFile(f) {
+  if (!(f instanceof Blob)) return false;
+  if (/image\/hei[cf]/i.test(f.type || "") || /\.hei[cf]$/i.test(f.name || "")) return true;
+  try {
+    const b = new Uint8Array(await f.slice(0, 16).arrayBuffer());
+    const tag = String.fromCharCode(...b.slice(4, 12));
+    return /^ftyp(heic|heix|hevc|hevx|heim|heis|mif1|msf1)/.test(tag);
+  } catch { return false; }
+}
+async function readableImageFile(f) {
+  if (!(await isHeifFile(f))) return f;
+  const { heicTo } = await import("heic-to");
+  const jpg = await heicTo({ blob: f, type: "image/jpeg", quality: 0.92 });
+  return new File([jpg], (f.name || "photo").replace(/\.hei[cf]$/i, "") + ".jpg", { type: "image/jpeg", lastModified: f.lastModified || Date.now() });
+}
+
 // 파일 업로드 여러 화면(Design/Admin)에서 공용으로 씁니다.
 const MAX_UPLOAD_MB = 30;
 
 function UploadBox({ label, icon: Icon, done, fileName, onFile, accept, capture }) {
   const [error, setError] = React.useState("");
 
-  const handleChange = (e) => {
-    const f = e.target.files && e.target.files[0];
+  const handleChange = async (e) => {
+    let f = e.target.files && e.target.files[0];
     if (!f) return;
     setError("");
+    try { f = await readableImageFile(f); } catch { setError("고효율(HEIC) 사진을 열지 못했어요. 카메라 설정에서 '고효율 사진'을 끄고 다시 찍어 주세요."); return; }
 
     // 브라우저 단에서 확장자·용량만 1차로 확인합니다.
     // 실제 파일 내용(해상도, CMYK 여부, 악성코드 등) 검사는 반드시 서버에서 다시 해야 합니다.
@@ -7434,7 +7454,8 @@ async function cardScanAnalyze(img, guide, manualCorners = null, opts = {}) {
 }
 
 // ---- 카메라 촬영 화면 (가이드 사각형) ----
-function CardCameraCapture({ onUseFile }) {
+function CardCameraCapture({ onUseFile: onUseRaw }) {
+  const onUseFile = async (f) => { try { f = await readableImageFile(f); } catch { /* 아래 화면에서 '불러오지 못했어요' 안내 */ } onUseRaw(f); };
   // 2026-11-22 — 휴대폰 원래 카메라 앱으로 찍음 (자동 초점·최고 화질·화면 전체).
   // 정확도는 찍은 뒤 '모서리 맞추기'에서 확인하므로, 찍기 전 화면 속 가이드는 두지 않음
   const [dragOver, setDragOver] = useState(false);
@@ -8470,9 +8491,9 @@ function ChatUploadBox({ onFile, accept = "image/*", mode = "both" }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <input ref={cameraRef} type="file" accept={accept} capture="environment" style={{ display: "none" }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+        onChange={async (e) => { const f = e.target.files?.[0]; if (f) onFile(await readableImageFile(f).catch(() => f)); }} />
       <input ref={fileRef} type="file" accept={accept} style={{ display: "none" }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+        onChange={async (e) => { const f = e.target.files?.[0]; if (f) onFile(await readableImageFile(f).catch(() => f)); }} />
       <div style={{ display: "flex", gap: 8 }}>
         {mode !== "file" && (
           <button onClick={() => cameraRef.current?.click()} style={{
@@ -11049,7 +11070,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
               <img src={logoCutUrls.orig} alt="사진에서 오린 로고" style={{ width: "100%", height: 90, objectFit: "contain" }} />
             </div>
             <input id="logoOriginalFile" type="file" accept="image/*,.pdf,.ai,.eps,.svg" style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) { setLogoFile(f); commit("로고 원본 파일을 올렸어요", "ocrResultReview"); } }} />
+              onChange={async (e) => { let f = e.target.files?.[0]; if (f) f = await readableImageFile(f).catch(() => f); if (f) { setLogoFile(f); commit("로고 원본 파일을 올렸어요", "ocrResultReview"); } }} />
             <div style={{ display: "grid", gap: 8 }}>
               <label htmlFor="logoOriginalFile" style={{ display: "block", textAlign: "center", background: "var(--stamp)", color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>① 원본 파일 올리기</label>
               <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "8px 10px" }}>
