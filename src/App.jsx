@@ -7472,9 +7472,13 @@ function CardCameraCapture({ onCaptured, onUseFile }) {
     return () => clearInterval(id);
   }, [state]);
 
+  const [shooting, setShooting] = useState(false);
   const shoot = async () => {
-    const v = videoRef.current; if (!v) return;
-    const img = await cardScanLoadImage(v, 3200);
+    const v = videoRef.current; if (!v || shooting) return;
+    setShooting(true); // 누르자마자 '찍는 중' 표시 (큰 사진을 읽는 동안 반응 없는 것처럼 보이지 않게)
+    await new Promise((r) => setTimeout(r, 30));
+    let img;
+    try { img = await cardScanLoadImage(v, 3200); } catch { setShooting(false); return; }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     onCaptured(img, CardScan.defaultGuide(img.width, img.height));
   };
@@ -7511,7 +7515,7 @@ function CardCameraCapture({ onCaptured, onUseFile }) {
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         {state === "live" && (
           <button onClick={shoot} style={{ flex: 2, background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 10, padding: "12px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            <Camera size={16} /> 촬영하기
+            <Camera size={16} /> {shooting ? "찍는 중…" : "촬영하기"}
           </button>
         )}
         {/* 2026-11-22 — 숨긴 입력을 코드로 누르는 방식은 앱 속 화면(웹뷰)에서 막히는 일이 있어,
@@ -7628,8 +7632,10 @@ function CardCornerEditor({ img, corners, onChange, highlight, selected, onSelec
           if (best >= 0 && bd < r.width * 0.22) startDrag(e, best);
         }}
         onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-        <svg viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="xMidYMid meet" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
-          <image href={img.url} x="0" y="0" width={img.width} height={img.height} preserveAspectRatio="none" />
+        {/* 사진은 일반 <img>로 그림 (SVG 속 그림은 일부 브라우저에서 안 보이는 일이 있어) — 보이는 범위만큼 옮기고 키움 */}
+        <img src={img.url} alt="찍은 명함" draggable={false}
+          style={{ position: "absolute", left: `${-view.x / view.w * 100}%`, top: `${-view.y / view.h * 100}%`, width: `${img.width / view.w * 100}%`, height: `${img.height / view.h * 100}%`, maxWidth: "none", pointerEvents: "none", userSelect: "none" }} />
+        <svg viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
           {autoCorners && (
             <polygon points={autoCorners.map((p) => p.join(",")).join(" ")} fill="none" stroke="#3B82F6" strokeWidth={R * 0.14} strokeDasharray={`${R * 0.35} ${R * 0.25}`} />
           )}
@@ -8171,11 +8177,12 @@ function CaptureGuideCard({ onNext }) {
         <li>네 모서리가 모두 보이도록 촬영해주세요</li>
         <li>빛이 반사되지 않는 곳에서 찍어주세요</li>
         <li>흔들리지 않게 가까이에서 촬영해주세요</li>
+        <li>스캐너로 스캔한 파일이나 찍어 둔 사진이 있으면 바로 올려도 돼요</li>
       </ul>
       <button onClick={onNext} style={{
         width: "100%", background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 10,
         padding: "11px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-      }}>촬영하러 가기</button>
+      }}>사진 찍기 · 스캔 파일 올리기</button>
     </div>
   );
 }
@@ -10696,7 +10703,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     finishedFileUpload: "완성된 명함 파일을 올려주세요.",
     finishedFileCheck: "인쇄 가능 여부를 확인하고 있어요.",
     finishedFilePreview: "업로드하신 파일을 확인해주세요.",
-    replicateUploadScan: "명함을 화면의 사각형 안에 맞춰 찍어 주세요. 찍어 둔 사진이 있으면 올려 주셔도 돼요.",
+    replicateUploadScan: "명함을 화면의 사각형 안에 맞춰 찍어 주세요. 찍어 둔 사진이나 스캔 파일이 있으면 올려 주셔도 돼요.",
     replicateQualityCheck: "찍은 사진을 확인했어요. 명함 테두리가 맞는지 봐 주세요.",
     replicateLogoArea: "명함에서 로고가 있는 곳을 손가락으로 끌어 사각형으로 표시해 주세요. 로고가 없으면 '로고 없음'을 눌러 주세요.",
     replicateLogoChoice: "이 로고는 색이 여러 가지라 사진으로는 선명하게 인쇄하기 어렵습니다. 로고 원본 파일(AI·PDF·큰 그림 파일)이 있으시면 올려 주세요. 없으시면 사진에서 오려 쓸 수 있지만, 선명하지 않거나 원본과 다르게 인쇄될 수 있습니다.",
@@ -10864,7 +10871,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         ]}
           onPick={(o) => { if (o.value === "home") { back(); return; } commit(o.label, "company"); }} />;
       case "replicateScanGuide":
-        return <CaptureGuideCard onNext={() => commit("촬영하러 갈게요", "replicateUploadScan")} />;
+        return <CaptureGuideCard onNext={() => commit("사진 찍기·스캔 파일 올리기로 갈게요", "replicateUploadScan")} />;
       case "expressLogoUpload":
         return (
           <>
