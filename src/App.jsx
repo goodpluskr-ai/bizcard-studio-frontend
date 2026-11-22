@@ -8060,23 +8060,53 @@ async function requestAiLogoRedraw(srcCanvas) {
 
 // ---- 로고 영역 지정 (끌어서 사각형) ----
 function LogoAreaPicker({ flatUrl, onPicked, onNone }) {
-  const ref = useRef(null), imgRef = useRef(null);
-  const [rect, setRect] = useState(null), [start, setStart] = useState(null);
+  // 2026-11-22 — 상자를 그린 뒤에도 고칠 수 있게: 네 모서리 손잡이로 크기 조절, 상자 안을 끌면 이동,
+  // 빈 곳을 대각선으로 그으면 새 상자. 처음에는 가운데에 기본 상자를 놓아 바로 손잡이로 맞출 수 있게 함
+  const ref = useRef(null), imgRef = useRef(null), drag = useRef(null);
+  const [rect, setRect] = useState({ x: 0.35, y: 0.25, w: 0.3, h: 0.35 });
   const pos = (e) => { const r = ref.current.getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
+  const down = (e) => {
+    e.preventDefault();
+    const r = ref.current.getBoundingClientRect(), p = pos(e);
+    const tx = 28 / r.width, ty = 28 / r.height; // 손잡이 잡는 범위 (손가락 크기)
+    const cs = [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]];
+    let best = -1, bd = 1e9;
+    cs.forEach((c, i) => { const d = Math.hypot((p[0] - c[0]) / tx, (p[1] - c[1]) / ty); if (d < 1 && d < bd) { bd = d; best = i; } });
+    if (best >= 0) drag.current = { mode: "corner", fixed: cs[(best + 2) % 4] };
+    else if (p[0] > rect.x && p[0] < rect.x + rect.w && p[1] > rect.y && p[1] < rect.y + rect.h) drag.current = { mode: "move", p0: p, r0: rect };
+    else { drag.current = { mode: "corner", fixed: p }; setRect({ x: p[0], y: p[1], w: 0, h: 0 }); }
+    ref.current.setPointerCapture?.(e.pointerId);
+  };
+  const move = (e) => {
+    const d = drag.current; if (!d) return; const p = pos(e);
+    if (d.mode === "corner") setRect({ x: Math.min(p[0], d.fixed[0]), y: Math.min(p[1], d.fixed[1]), w: Math.abs(p[0] - d.fixed[0]), h: Math.abs(p[1] - d.fixed[1]) });
+    else { const nx = Math.min(1 - d.r0.w, Math.max(0, d.r0.x + p[0] - d.p0[0])), ny = Math.min(1 - d.r0.h, Math.max(0, d.r0.y + p[1] - d.p0[1])); setRect({ ...d.r0, x: nx, y: ny }); }
+  };
+  const ok = rect && rect.w >= 0.03 && rect.h >= 0.03;
+  const H = 22; // 손잡이 크기(px)
   return (
     <div style={{ marginBottom: 14 }}>
+      <div style={{ background: "#FFF6D6", border: "2px solid #F2B705", borderRadius: 10, padding: "8px 10px", marginBottom: 8, fontSize: 12, lineHeight: 1.6 }}>
+        <b>로고를 상자로 감싸 주세요.</b> 네 모서리 동그라미를 끌어 크기를 맞추고, 상자 안을 끌면 옮겨져요.
+        로고 둘레를 조금 여유 있게 감싸면 돼요 (회사 이름 글자가 로고에 붙어 있으면 함께).
+      </div>
       <div ref={ref} style={{ position: "relative", touchAction: "none", userSelect: "none", borderRadius: 8, overflow: "hidden", border: "1px solid var(--line)" }}
-        onPointerDown={(e) => { e.currentTarget.setPointerCapture?.(e.pointerId); const p = pos(e); setStart(p); setRect({ x: p[0], y: p[1], w: 0, h: 0 }); }}
-        onPointerMove={(e) => { if (!start) return; const p = pos(e); setRect({ x: Math.min(p[0], start[0]), y: Math.min(p[1], start[1]), w: Math.abs(p[0] - start[0]), h: Math.abs(p[1] - start[1]) }); }}
-        onPointerUp={() => setStart(null)}>
+        onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
         <img ref={imgRef} src={flatUrl} alt="반듯하게 편 명함" style={{ width: "100%", display: "block" }} draggable={false} />
-        {rect && <div style={{ position: "absolute", left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%`, border: "2px solid var(--stamp)", background: "rgba(255,90,40,0.08)" }} />}
+        {rect && <>
+          <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "rgba(0,0,0,0.35)",
+            clipPath: `polygon(0 0,100% 0,100% 100%,0 100%,0 0,${rect.x * 100}% ${rect.y * 100}%,${rect.x * 100}% ${(rect.y + rect.h) * 100}%,${(rect.x + rect.w) * 100}% ${(rect.y + rect.h) * 100}%,${(rect.x + rect.w) * 100}% ${rect.y * 100}%,${rect.x * 100}% ${rect.y * 100}%)` }} />
+          <div style={{ position: "absolute", pointerEvents: "none", left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%`, border: "2px solid var(--stamp)" }} />
+          {[[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]].map(([cx, cy], i) => (
+            <div key={i} style={{ position: "absolute", pointerEvents: "none", left: `calc(${cx * 100}% - ${H / 2}px)`, top: `calc(${cy * 100}% - ${H / 2}px)`, width: H, height: H, borderRadius: "50%", background: "#fff", border: "3px solid var(--stamp)", boxShadow: "0 1px 4px rgba(0,0,0,.4)" }} />
+          ))}
+        </>}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <button onClick={onNone} style={{ flex: 1, background: "var(--paper-deep)", border: "1px solid var(--line)", color: "var(--ink)", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>로고 없음</button>
-        <button disabled={!rect || rect.w < 0.03 || rect.h < 0.03}
-          onClick={() => { const im = imgRef.current, W = im.naturalWidth, H = im.naturalHeight; onPicked(im, { x: Math.round(rect.x * W), y: Math.round(rect.y * H), w: Math.max(4, Math.round(rect.w * W)), h: Math.max(4, Math.round(rect.h * H)) }); }}
-          style={{ flex: 1, background: rect && rect.w >= 0.03 ? "var(--stamp)" : "var(--line)", border: "none", color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>이 부분이 로고예요</button>
+        <button disabled={!ok}
+          onClick={() => { const im = imgRef.current, W = im.naturalWidth, H2 = im.naturalHeight; onPicked(im, { x: Math.round(rect.x * W), y: Math.round(rect.y * H2), w: Math.max(4, Math.round(rect.w * W)), h: Math.max(4, Math.round(rect.h * H2)) }); }}
+          style={{ flex: 1, background: ok ? "var(--stamp)" : "var(--line)", border: "none", color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>이 부분이 로고예요</button>
       </div>
     </div>
   );
@@ -8133,7 +8163,7 @@ function CaptureGuideCard({ onNext }) {
         <li>명함을 화면에 크게 담아주세요</li>
         <li>네 모서리가 모두 보이도록 촬영해주세요</li>
         <li>빛이 반사되지 않는 곳에서 찍어주세요</li>
-        <li>흔들리지 않게 가까이에서 촬영해주세요</li>
+        <li>너무 가까우면 초점이 안 맞아요 — 한 뼘 정도 떨어져서, 흔들리지 않게 찍어주세요</li>
         <li>스캐너로 스캔한 파일이나 찍어 둔 사진이 있으면 바로 올려도 돼요</li>
       </ul>
       <button onClick={onNext} style={{
