@@ -6793,7 +6793,8 @@ function ChatBubble({ from, children }) {
 
 function ChatChoiceRow({ options, onPick, disabled }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+    // 2026-11-24 사장님 원칙: 버튼이 1개면 가운데, 여러 개면 오른쪽(고객 답이 오른쪽에 쌓이는 상담 화면과 같은 쪽)
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, justifyContent: options.length === 1 ? "center" : "flex-end" }}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -8419,17 +8420,18 @@ function ChatConfirmCard({ title, rows, onApply, onRetry, applyLabel = "이대�
           </div>
         ))}
       </div>
+      {/* 2026-11-24 — 주 버튼(진행)은 오른쪽, 되돌리기는 왼쪽 */}
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={onApply} style={{
-          flex: 1, background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 10,
-          fontSize: 13, fontWeight: 700, padding: "11px 0", cursor: "pointer", fontFamily: "inherit",
-        }}>{applyLabel}</button>
         {onRetry && (
           <button onClick={onRetry} style={{
             flex: 1, background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)",
             borderRadius: 10, fontSize: 13, fontWeight: 700, padding: "11px 0", cursor: "pointer", fontFamily: "inherit",
           }}>{retryLabel}</button>
         )}
+        <button onClick={onApply} style={{
+          flex: 1, background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 10,
+          fontSize: 13, fontWeight: 700, padding: "11px 0", cursor: "pointer", fontFamily: "inherit",
+        }}>{applyLabel}</button>
       </div>
     </div>
   );
@@ -9086,8 +9088,23 @@ function prepareOcrLines(serverLines) {
       status: "pending", // pending → confirmed(그대로) / edited(고침) / removed(뺌)
     };
   });
-  const rank = (l) => (l.flagged ? 0 : l.mustCheck ? 1 : 2);
-  return lines.sort((a, b) => rank(a) - rank(b) || a.id - b.id);
+  // 2026-11-24 사장님 지적: 확인 필요 줄을 위로 올리면 순서가 뒤섞여 고객이 당황함(최신컴퓨터가 뒤로 밀림)
+  // → 명함에 적힌 순서 그대로: 위→아래, 같은 줄(세로로 절반 이상 겹침)이면 왼쪽→오른쪽. 확인 필요 줄은 색 표시만
+  serverLines.forEach((l, i) => { if (l.box) lines[i].box = l.box; });
+  const withBox = lines.filter((l) => l.box && Number.isFinite(l.box.t));
+  if (withBox.length !== lines.length) return lines; // 위치가 없으면 서버가 준 순서(읽은 순서) 그대로
+  const byTop = [...lines].sort((a, b) => (a.box.t + a.box.b) - (b.box.t + b.box.b));
+  const rows = [];
+  for (const l of byTop) {
+    const h = l.box.b - l.box.t, row = rows.find((r) => {
+      const ov = Math.min(r.b, l.box.b) - Math.max(r.t, l.box.t);
+      return ov >= 0.5 * Math.min(h, r.b - r.t);
+    });
+    if (row) { row.items.push(l); row.t = Math.min(row.t, l.box.t); row.b = Math.max(row.b, l.box.b); }
+    else rows.push({ t: l.box.t, b: l.box.b, items: [l] });
+  }
+  rows.sort((a, b) => (a.t + a.b) - (b.t + b.b));
+  return rows.flatMap((r) => r.items.sort((a, b) => a.box.l - b.box.l));
 }
 
 function OcrCardViewer({ flatUrl }) {
@@ -9111,6 +9128,16 @@ function OcrLineConfirm({ flatUrl, state, setState, onDone, onManual }) {
   // (상태가 idle→reading으로 바뀌는 것 자체로 요청이 취소되지 않게 — 2026-11-22 시험에서 발견한 버그)
   const reqRef = useRef(null);
   useEffect(() => () => { reqRef.current = null; }, []);
+  // 2026-11-24 — 모든 줄을 확인하면 바로 다음 단계로 (빠진 줄을 직접 쓰는 중이면 기다림). 훅은 화면 분기보다 위에
+  const allLines = state.lines || [], nPending = allLines.filter((l) => l.status === "pending").length;
+  const typingManual = (state.manualLines || []).some((t) => t.trim());
+  const sawPending = useRef(false);
+  if (state.status === "ready" && nPending > 0) sawPending.current = true;
+  useEffect(() => {
+    if (state.status !== "ready" || !sawPending.current || nPending > 0 || !allLines.length || typingManual) return;
+    const t = setTimeout(() => onDone(allLines, []), 500);
+    return () => clearTimeout(t);
+  }, [state.status, nPending, typingManual]);
   useEffect(() => {
     if (!flatUrl || state.status !== "idle") return;
     const token = {}; reqRef.current = token;
@@ -9136,7 +9163,7 @@ function OcrLineConfirm({ flatUrl, state, setState, onDone, onManual }) {
     return (
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 12.5, color: "var(--stamp)", marginBottom: 8 }}>글자를 읽지 못했어요: {state.error}</div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
           <button style={btn("var(--stamp)")} onClick={() => setState({ status: "idle", lines: [], error: "" })}>다시 읽기</button>
           <button style={btn("var(--paper-white)", "var(--ink)", "1.5px solid var(--line)")} onClick={onManual}>직접 입력할게요</button>
         </div>
@@ -9196,13 +9223,13 @@ function OcrLineConfirm({ flatUrl, state, setState, onDone, onManual }) {
                     <button style={{ ...btn("none", "var(--stamp)"), padding: 0, textDecoration: "underline" }} onClick={() => upd(l.id, { text: l.suggestion })}>제안대로 바꾸기</button>
                   </div>
                 )}
-                <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", justifyContent: "flex-end" }}>
                   {!isDone ? (
                     <>
+                      <button style={btn("var(--paper-white)", "var(--ink-soft)", "1.5px solid var(--line)")} onClick={() => lock(l.id, "removed")}>이 줄 빼기</button>
                       <button style={btn("var(--stamp)")} onClick={() => lock(l.id, l.text.trim() === l.aiText.trim() ? "confirmed" : "edited")}>
                         {l.text.trim() === l.aiText.trim() ? "맞아요" : "고친 대로 확인"}
                       </button>
-                      <button style={btn("var(--paper-white)", "var(--ink-soft)", "1.5px solid var(--line)")} onClick={() => lock(l.id, "removed")}>이 줄 빼기</button>
                     </>
                   ) : (
                     <>
@@ -9663,6 +9690,8 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
   // 로고 준비 방법 5가지: "file"(파일업로드) | "scan"(촬영·스캔) | "companyLogo"(회사 공식로고)
   // | "new"(AI 신규제작) | "skip"(로고 없이 진행)
   const [logoMethod, setLogoMethod] = useState(null);
+  // 2026-11-24 — 명함 샘플로 주문: "sampleEdit"(3번 디자인 그대로·정보만 바꾸기) / "replicate"(4번 똑같이). 디자인 과정 없음
+  const [scanOrderMode, setScanOrderMode] = useState(null);
   const [logoFile, setLogoFile] = useState(null);
   // ⚠️ 구조수정(2026-09-04, 사장님 지적: "배경 작업에서 왜 로고 데이터를 빌려가나요?") —
   // logoFile 하나가 "로고 이미지"와 "촬영한 명함 전체 원본 사진"이라는 서로 다른
@@ -10174,7 +10203,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     expressLogoUpload: "로고 업로드", expressLogoConfirm: "로고 확인",
     finishedFileUpload: "완성파일 업로드", finishedFileCheck: "인쇄가능 확인", finishedFilePreview: "완성파일 미리보기",
     logoScanGuide: "촬영 안내", replicateScanGuide: "촬영 안내",
-    replicateUploadScan: "명함 촬영", replicateQualityCheck: "사진 품질 확인", replicateLogoArea: "로고 위치", replicateLogoChoice: "로고 준비 방법", replicateLogoAiCompare: "AI 로고 비교", ocrResultReview: "명함 글자 확인", ocrFieldReview: "정보 항목 확인",
+    replicateUploadScan: "명함 촬영", replicateQualityCheck: "사진 품질 확인", replicateLogoArea: "로고 위치", replicateLogoChoice: "로고 준비 방법", replicateLogoAiCompare: "AI 로고 비교", ocrResultReview: "명함 글자 확인", ocrFieldReview: "정보 항목 확인", replicateConfirm: "주문 확인",
     logoSourceChoice: "로고 출처 선택",
     company: "회사명", personName: "성명", phone: "연락처",
     positionInput: "직함", addressInput: "주소", telInput: "회사 전화번호", faxInput: "팩스",
@@ -10695,8 +10724,9 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     replicateLogoArea: "명함에서 로고가 있는 곳을 손가락으로 끌어 사각형으로 표시해 주세요. 로고가 없으면 '로고 없음'을 눌러 주세요.",
     replicateLogoChoice: "이 로고는 색이 여러 가지라 사진으로는 선명하게 인쇄하기 어렵습니다. 로고 원본 파일(AI·PDF·큰 그림 파일)이 있으시면 올려 주세요. 없으시면 사진에서 오려 쓸 수 있지만, 선명하지 않거나 원본과 다르게 인쇄될 수 있습니다.",
     replicateLogoAiCompare: "AI가 다시 그린 로고예요. 원본과 나란히·겹쳐 보고, 같으면 승인해 주세요.",
+    replicateConfirm: "확인하신 내용으로 주문을 준비했어요. 맞으면 배송지·결제로 넘어갈게요.",
     ocrResultReview: "명함 글자를 읽을게요. 사진과 한 줄씩 비교해서, 인쇄된 그대로인지 확인해 주세요.",
-    ocrFieldReview: "확인한 글자를 항목별로 나눴어요. 제자리에 들어갔는지 봐 주세요. 맞지 않으면 고쳐 주세요.",
+    ocrFieldReview: "확인한 글자를 항목별로 나눴어요. 제자리에 들어갔는지 보고, 바꿀 정보가 있으면 고쳐 주세요.",
     logoSourceChoice: "인증된 이 회사의 공식 로고가 있어요. 촬영본과 공식로고 중 어느 걸 쓸까요?",
     company: "안녕하세요! AI가 명함 디자인을 도와드릴게요. 로고와 배경 디자인은 무료로 제안해드려요.\n영문을 표기하실 분은 영문도 같이 입력해주세요. 한글을 입력한 뒤 [영문입력]을 누르시면 돼요.\n회사명을 입력해주세요.",
     personName: "성함을 입력해주세요.",
@@ -10790,9 +10820,10 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         // 사람에게는 AI 상담 자체가 아예 안 나타납니다.
         return <ChatChoiceRow options={[
           ...(hadIncompleteProjectAtStart ? [{ label: "이어서 작업하기", value: "resume" }] : []),
+          // 2026-11-24 사장님 확정 — 주문 방식 4가지. 로고 파일은 1번(처음부터) 안에서 올림
           { label: "처음부터 만들기", value: "new" },
-          { label: "로고 파일이 있어요", value: "logoOnly" },
           { label: "완성된 명함 파일이 있어요", value: "finishedFile" },
+          { label: "명함 샘플의 디자인 그대로, 정보만 바꿀게요", value: "sampleEdit" },
           { label: "가지고 있는 명함과 똑같이 만들고 싶어요", value: "replicate" },
         ]}
           onPick={(o) => {
@@ -10847,6 +10878,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
             if (o.value === "logoOnly") { setLogoMethod("file"); commit(o.label, "expressLogoUpload"); return; }
             if (o.value === "finishedFile") { commit(o.label, "finishedFileUpload"); return; }
             setLogoMethod("scan");
+            setScanOrderMode(o.value === "sampleEdit" ? "sampleEdit" : "replicate");
             commit(o.label, "replicateScanGuide");
           }} />;
       case "resumeUnavailable":
@@ -11015,7 +11047,8 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
               // 로고는 더 고운 해상도(1mm=24화소)로 펴서 씀(글자 판독도 이 사진으로)
               try { setLogoFlatUrl(cardScanFlatDataUrl(cardScan.img, cardScan.result.corners, 24, cardScan.result.sizeMm)); } catch { setLogoFlatUrl(cardScan.result.flatUrl); }
               setLogoKind(null); setLogoCutUrls({ orig: null, clean: null, ai: null, aiMock: false }); setLogoCutConsent(false);
-              commit("이 사진 사용할게요", "replicateLogoArea");
+              // 2026-11-24 — 3·4번은 명함 전체를 그대로 쓰므로 로고를 따로 고르지 않고 바로 글자 확인
+              commit("이 사진 사용할게요", scanOrderMode ? "ocrResultReview" : "replicateLogoArea");
             }}
             onRetake={() => { setCardScan(null); setLogoQualityWarning(""); setLog((l) => l.slice(0, -1)); setStep("replicateUploadScan"); }} />
         );
@@ -11140,7 +11173,44 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         // 2026-11-22: 예시(getMockOcrResult) 대신 실제 판독 — 펴진 명함(1mm=24화소)을 서버로 보내고 줄마다 고객 확인
         return <OcrLineConfirm flatUrl={logoFlatUrl || cardPhotoFlatUrl} state={ocrState} setState={setOcrState}
           onManual={() => { setOcrFields({ fields: {}, etcCandidates: [], rawText: "" }); commit("직접 입력할게요", "ocrFieldReview"); }}
-          onDone={(lines, manual) => { setOcrFields(ocrLinesToFields(lines, manual)); commit("글자를 모두 확인했어요", "ocrFieldReview"); }} />;
+          onDone={(lines, manual) => {
+            setOcrFields(ocrLinesToFields(lines, manual)); setOcrState((s) => ({ ...s, finalLines: lines, finalManual: manual }));
+            // 4번(똑같이): 확인 끝 → 바로 주문 확인. 3번(정보만 바꾸기): 바꿀 정보 고치기 → 주문 확인
+            commit("글자를 모두 확인했어요", scanOrderMode === "replicate" ? "replicateConfirm" : "ocrFieldReview");
+          }} />;
+      case "replicateConfirm": {
+        // 2026-11-24 — 3·4번 마무리: 디자인 상담 없이 배송지·결제로. 명함을 다시 만드는 엔진이 서버에 붙기 전까지는
+        // 펴진 명함 사진 + 확인한 글자(+3번은 바꿀 정보)를 주문에 붙여 담당자가 시안을 만들고 고객 확인 후 인쇄
+        const isEdit = scanOrderMode === "sampleEdit";
+        const ed = ocrFields?.edited || {};
+        const changed = isEdit ? [["회사", ed.companyName], ["이름", ed.personName], ["직책", ed.position], ["휴대폰", ed.mobile], ["전화", ed.telephone], ["팩스", ed.fax], ["이메일", ed.email], ["홈페이지", ed.website], ["주소", ed.address]].filter(([, v]) => v) : [];
+        return (
+          <>
+            {(logoFlatUrl || cardPhotoFlatUrl) && <img src={logoFlatUrl || cardPhotoFlatUrl} alt="찍은 명함" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 8, display: "block" }} />}
+            <ChatConfirmCard
+              title={isEdit ? "이 디자인에 바꾼 정보로 만들까요?" : "이 명함과 똑같이 만들까요?"}
+              rows={[
+                { k: "주문 방식", v: isEdit ? "디자인 그대로, 정보만 바꾸기" : "가지고 있는 명함과 똑같이" },
+                ...changed.map(([k, v]) => ({ k, v })),
+                { k: "안내", v: "글자는 확인하신 그대로 넣어요. 시안을 만들어 확인을 받은 뒤 인쇄해요" + (isEdit ? ". 특별한 글씨체는 가장 비슷한 글씨체로 보여 드려요" : "") },
+              ]}
+              applyLabel="네, 이대로 진행"
+              retryLabel="다시 찍기"
+              onApply={async () => {
+                const flat = logoFlatUrl || cardPhotoFlatUrl;
+                patch({
+                  specialOrderFile: flat ? { dataUrl: flat, name: isEdit ? "샘플명함_정보변경.jpg" : "샘플명함_그대로.jpg" } : null,
+                  designRecipe: { kind: isEdit ? "sampleEdit" : "replicate", sizeMm: cardScan?.result?.sizeMm || null,
+                    lines: (ocrState.finalLines || []).filter((l) => l.status !== "removed").map((l) => ({ text: l.text, type: l.type, box: l.box || null, status: l.status })),
+                    manualLines: ocrState.finalManual || [], edited: isEdit ? ed : null },
+                });
+                go("shipping");
+              }}
+              onRetry={() => { setCardScan(null); setLog((l) => l.slice(0, -1)); setStep("replicateUploadScan"); }}
+            />
+          </>
+        );
+      }
       case "ocrFieldReview": {
         const ocr = ocrFields || { fields: {}, etcCandidates: [], rawText: "" };
         return <OcrReviewForm initialValues={ocr.fields} etcCandidates={ocr.etcCandidates} rawText={ocr.rawText}
@@ -11149,6 +11219,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
             setPhone(vals.mobile); setTelephone(vals.telephone); setFax(vals.fax || ""); setEmail(vals.email);
             setWebsite(vals.website); setAddress(vals.address); setEtcInfo(vals.etc);
             setWentThroughOcrReview(true); // 이 화면에서 이미 회사전화·이메일·홈페이지까지 다 물어봤음
+            if (scanOrderMode === "sampleEdit") { setOcrFields((o) => ({ ...(o || {}), edited: vals })); commit("바꿀 정보를 정했어요", "replicateConfirm"); return; }
             commit("확인했어요", "infoConfirm");
           }} />;
       }
