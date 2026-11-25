@@ -3,7 +3,8 @@
 // Shared contact geometry + SVG text output; safe-area conversions for logo/QR.
 // Validated: full-file esbuild, server React/SVG output in 8 scenarios.
 // Pending: browser interaction/font rendering, physical print readability, real QR encoder.
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, Award, Camera, Check, CreditCard, Crown, FileText, Gem, Gift, Globe, Home as HomeIcon, Landmark, Mail, MapPin, Package, PackageSearch, Phone, Printer, Search, Settings, Star, Truck, Upload, User, UserCircle2, Wand2, X, Zap } from "lucide-react";
 
 // Shared UI guidance color, used by both the full app and the review shell.
@@ -8452,7 +8453,11 @@ function formatPhoneInput(raw) {
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
 }
 
+// 2026-11-25 사장님 요청 — Claude 대화창처럼: 입력칸은 화면 아래 같은 자리에 고정, 대화는 위로 올라감.
+// AI 디자인 상담 화면이 아래 고정 칸(ComposerSlot)을 주면 거기로 옮겨 그리고, 없으면(다른 화면) 제자리에 그림
+const ComposerSlotContext = createContext(null);
 function ChatTextComposer({ placeholder, onSubmit, onSkip, skipLabel, disabled, initialValue, needsReview, formatValue, multiline, onEnglish }) {
+  const slot = useContext(ComposerSlotContext);
   const [val, setVal] = useState(initialValue || "");
   const [englishHint, setEnglishHint] = useState(false);
   const submit = () => {
@@ -8460,61 +8465,59 @@ function ChatTextComposer({ placeholder, onSubmit, onSkip, skipLabel, disabled, 
     onSubmit(val.trim());
     setVal("");
   };
-  // 2026-09-22 추가 — introText(소개문구)처럼 고객이 직접 줄바꿈을 넣어야 하는
-  // 필드용. 기존 input과 동작이 다른 점: Enter가 제출이 아니라 줄바꿈이고(그래서
-  // "확인" 버튼을 눌러야 제출), textarea를 씁니다. 그 외(placeholder/onSkip/
-  // formatValue 등)는 전부 동일 — 다른 모든 필드의 기존 동작은 안 건드립니다.
+  // 여러 줄 칸(소개문구 등)은 Enter가 줄바꿈 → 보내기 버튼으로 제출
   const InputTag = multiline ? "textarea" : "input";
-  return (
-    <div style={{ marginBottom: 14 }}>
+  const can = !disabled && !!val.trim();
+  const small = (color, border) => ({
+    background: "var(--paper-white)", border: `1.5px solid ${border}`, color, borderRadius: 999,
+    padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", opacity: disabled ? 0.6 : 1,
+  });
+  const ui = (
+    <div style={{ marginBottom: slot ? 0 : 14 }}>
       {needsReview && (
         <div style={{ fontSize: 11, color: "var(--stamp)", fontWeight: 700, marginBottom: 6 }}>
           ⚠️ 사진에서 읽은 예시 값이에요 — 실제와 다르면 직접 고쳐주세요
         </div>
       )}
-      <InputTag
-        disabled={disabled}
-        style={{
-          width: "100%", border: `1.5px solid ${needsReview ? "var(--stamp)" : "var(--line)"}`, borderRadius: 10, padding: "10px 12px",
-          fontSize: 13, fontFamily: "inherit", background: disabled ? "var(--paper-deep)" : "var(--paper-white)",
-          color: "var(--ink)", opacity: disabled ? 0.6 : 1, marginBottom: 8, boxSizing: "border-box",
-          ...(multiline ? { minHeight: 78, resize: "vertical", lineHeight: 1.5 } : {}),
-        }}
-        placeholder={placeholder} value={val} autoFocus
-        onChange={(e) => setVal(formatValue ? formatValue(e.target.value) : e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter" || e.nativeEvent?.isComposing) return;
-          // 2026-10-01 — 아무것도 안 쓰고 엔터 = 건너뛰기(건너뛸 수 있는 칸만). 여러 줄 칸은
-          // 글자가 있을 때 엔터가 줄바꿈이라 [확인]으로 제출합니다.
-          if (!val.trim()) { if (onSkip && !disabled) { e.preventDefault(); onSkip(); } return; }
-          if (!multiline) submit();
-        }}
-      />
-      <div style={{ display: "flex", gap: 8 }}>
-        {onSkip && (
-          <button disabled={disabled} onClick={onSkip} style={{
-            flex: 1, background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink-soft)",
-            borderRadius: 10, padding: "10px 0", fontSize: 13, fontWeight: 700,
-            cursor: disabled ? "default" : "pointer", fontFamily: "inherit", opacity: disabled ? 0.6 : 1,
-          }}>{skipLabel || "생략"}</button>
-        )}
-        {onEnglish && (
-          // 2026-10-01 — [확인] 옆 [영문입력]: 한글을 먼저 입력해야 눌림(빈 칸이면 안내만).
-          <button disabled={disabled} onClick={() => { if (!val.trim()) { setEnglishHint(true); return; } onEnglish(val.trim()); setVal(""); }} style={{
-            flex: 1, background: "var(--paper-white)", border: "1.5px solid var(--stamp)", color: "var(--stamp)",
-            borderRadius: 10, padding: "10px 0", fontSize: 13, fontWeight: 700,
-            cursor: disabled ? "default" : "pointer", fontFamily: "inherit", opacity: disabled ? 0.6 : 1,
-          }}>영문입력</button>
-        )}
-        <button disabled={disabled} onClick={submit} style={{
-          flex: 1, background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 10,
-          padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer",
-          fontFamily: "inherit", opacity: disabled ? 0.6 : 1,
-        }}>확인</button>
+      {(onSkip || onEnglish) && (
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginBottom: 6 }}>
+          {onSkip && <button disabled={disabled} onClick={onSkip} style={small("var(--ink-soft)", "var(--line)")}>{skipLabel || "생략"}</button>}
+          {onEnglish && (
+            // [영문입력]: 한글을 먼저 입력해야 눌림(빈 칸이면 안내만)
+            <button disabled={disabled} onClick={() => { if (!val.trim()) { setEnglishHint(true); return; } onEnglish(val.trim()); setVal(""); }} style={small("var(--stamp)", "var(--stamp)")}>영문입력</button>
+          )}
+        </div>
+      )}
+      <div style={{
+        display: "flex", alignItems: "flex-end", gap: 6, border: `1.5px solid ${needsReview ? "var(--stamp)" : "var(--line)"}`, borderRadius: 18,
+        background: disabled ? "var(--paper-deep)" : "var(--paper-white)", padding: "6px 6px 6px 14px", boxShadow: slot ? "0 1px 6px rgba(0,0,0,0.06)" : "none",
+      }}>
+        <InputTag
+          disabled={disabled}
+          style={{
+            flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", padding: "8px 0",
+            fontSize: 15, fontFamily: "inherit", color: "var(--ink)", opacity: disabled ? 0.6 : 1,
+            ...(multiline ? { minHeight: 60, maxHeight: 160, resize: "none", lineHeight: 1.5 } : {}),
+          }}
+          placeholder={placeholder} value={val} autoFocus
+          onChange={(e) => setVal(formatValue ? formatValue(e.target.value) : e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.nativeEvent?.isComposing) return;
+            // 아무것도 안 쓰고 엔터 = 건너뛰기(건너뛸 수 있는 칸만). 여러 줄 칸은 글자가 있으면 엔터 = 줄바꿈
+            if (!val.trim()) { if (onSkip && !disabled) { e.preventDefault(); onSkip(); } return; }
+            if (!multiline) submit();
+          }}
+        />
+        <button disabled={!can} onClick={submit} aria-label="보내기" style={{
+          flexShrink: 0, width: 36, height: 36, borderRadius: "50%", border: "none",
+          background: can ? "var(--stamp)" : "var(--line)", color: "#fff", fontSize: 18, fontWeight: 700,
+          cursor: can ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit",
+        }}>↑</button>
       </div>
       {englishHint && !val.trim() && <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>한글을 먼저 입력한 뒤 [영문입력]을 눌러주세요.</div>}
     </div>
   );
+  return slot ? createPortal(ui, slot) : ui;
 }
 
 function ChatUploadBox({ onFile, accept = "image/*", mode = "both" }) {
@@ -9626,6 +9629,14 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [editPickerOpen, setEditPickerOpen] = useState(false);
+  const [composerSlot, setComposerSlot] = useState(null); // 2026-11-25 아래 고정 입력칸 자리
+  const dockRef = useRef(null);
+  const [dockH, setDockH] = useState(120);
+  useEffect(() => {
+    const el = dockRef.current; if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setDockH(el.offsetHeight)); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const topRef = useRef(null);
   const bottomRef = useRef(null);
   const currentQuestionRef = useRef(null);
@@ -12987,9 +12998,11 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
   };
 
   return (
-    <div className="app-body" style={{ paddingBottom: 64 }}>
+    <ComposerSlotContext.Provider value={composerSlot}>
+    <div className="app-body" style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}>
       <TopBar title={step === "templateChoice" ? "명함 유형 선택" : "AI 디자인 상담"} sub={step === "templateChoice" ? null : `상태: ${CHAT_STATUS_LABEL[status]}`} onBack={handleBack} go={go} />
-      <div style={{ padding: "10px 16px 20px" }}>
+      {/* 대화가 짧아도 입력칸이 화면 맨 아래에 있도록 대화 영역이 남는 높이를 채움 */}
+      <div style={{ padding: "10px 16px 20px", flex: "1 0 auto" }}>
         <div ref={topRef} />
         {step !== "templateChoice" && log.map((e, i) => (
           <React.Fragment key={i}>
@@ -13003,13 +13016,20 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* 하단 고정 메뉴바 — 답변을 잘못했을 때 위/아래 이동 없이 바로 고칠 수 있게.
-          2026-09-02: 사장님 요청으로 추가(대화가 길어지면 스크롤로 예전 답을 찾아
-          고치기 번거롭다는 문제 해결용). */}
-      <div style={{
-        position: "sticky", bottom: 0, left: 0, right: 0, display: "flex",
-        background: "var(--paper-white)", borderTop: "1px solid var(--line)", zIndex: 6,
-      }}>
+      {/* 하단 고정: 입력칸(Claude 대화창처럼 항상 같은 자리) + 메뉴바.
+          메뉴바 — 2026-09-02 사장님 요청(대화가 길어지면 예전 답을 찾아 고치기 번거로움).
+          입력칸 — 2026-11-25 사장님 요청. 글자를 쓰는 단계가 아니면 같은 자리에 '위에서 골라 주세요'를 흐리게 보여 줌 */}
+      {/* 화면 틀(app-frame)이 overflow:hidden이라 sticky가 화면에 붙지 않음 → 화면 아래에 fixed로 붙이고, 같은 높이만큼 아래 여백 */}
+      <div style={{ height: dockH }} />
+      <div ref={dockRef} style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, zIndex: 6, background: "var(--paper)", borderTop: "1px solid var(--line)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+      <div style={{ padding: "8px 12px 4px" }}>
+        <div ref={setComposerSlot} className="composer-slot" />
+        <div className="composer-placeholder" style={{ border: "1.5px solid var(--line)", borderRadius: 18, background: "var(--paper-deep)", padding: "6px 6px 6px 14px", display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-soft)", padding: "8px 0" }}>{step === "templateChoice" ? "위에서 명함 유형을 골라 주세요" : "위의 버튼이나 화면에서 골라 주세요"}</span>
+          <span style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--line)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700 }}>↑</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", background: "var(--paper-white)" }}>
         {[
           { label: "이전으로", onClick: handleBack, disabled: revisionInProgress },
           { label: "맨위로", onClick: () => topRef.current?.scrollIntoView({ behavior: "smooth" }) },
@@ -13024,6 +13044,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
             {m.label}
           </button>
         ))}
+      </div>
       </div>
 
       {editPickerOpen && (
@@ -13156,6 +13177,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         );
       })()}
     </div>
+    </ComposerSlotContext.Provider>
   );
 }
 
@@ -14333,6 +14355,7 @@ function App() {
           display: flex; flex-direction: column; color: var(--ink);
         }
         .app-body { flex: 1; overflow-y: auto; padding-bottom: 20px; -webkit-overflow-scrolling: touch; }
+        .composer-slot:not(:empty) + .composer-placeholder { display: none !important; }
         input:focus, textarea:focus { outline: 2px solid var(--stamp); outline-offset: 1px; }
         ::placeholder { color: var(--ink-soft); opacity: 1; }
 
