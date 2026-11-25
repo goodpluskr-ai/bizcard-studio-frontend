@@ -5050,6 +5050,64 @@ async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment
 }
 
 // ==================== screens/Payment ====================
+// 2026-11-25 사장님 요청 — 결제 전에 일반·특별회원 모두 주문내역을 한 화면에서 확인.
+// 인쇄 방식(단면/양면)은 필수라 항상 표시, 다른 옵션은 고른 것만
+function OrderReview({ order, go, back, paper, category, unit, optTotal, shipFee, grandTotal }) {
+  const extra = Object.entries(order.selOptions || {}).filter(([c]) => c !== "OPT001")
+    .map(([c, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === c), sel)).filter(Boolean);
+  const f = order.specialOrderFile;
+  const preview = order.printFileSvg ? svgToDataUrl(order.printFileSvg) : (f?.dataUrl && /^data:image\//.test(f.dataUrl) ? f.dataUrl : null);
+  const ship = order.ship || {};
+  return (
+    <div className="app-body">
+      <TopBar title="주문내역 확인" onBack={back} step={6} go={go} />
+      <div style={{ padding: "6px 18px 16px" }}>
+        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>결제하기 전에 주문하신 내용이 맞는지 확인해 주세요.</div>
+        {(preview || f?.name) && (
+          <Card style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>명함</div>
+            {preview ? <img src={preview} alt="주문할 명함" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", display: "block" }} />
+              : <div style={{ fontSize: 12.5, color: "var(--ink)" }}>인쇄 파일: {f.name}</div>}
+          </Card>
+        )}
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>주문 내용</div>
+          <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
+          <SummaryRow k={TEXTS.summaryPaperLabel} v={paper?.name} />
+          {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
+          <SummaryRow k="인쇄 방식" v={order.selOptions?.OPT001?.choice === "double" ? "양면" : "단면"} />
+          {extra.length > 0 && <SummaryRow k={TEXTS.summaryOptionLabel} v={extra.join(", ")} />}
+          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
+          <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
+        </Card>
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>배송지</div>
+          <SummaryRow k={TEXTS.shippingNameLabel} v={ship.name || "-"} />
+          <SummaryRow k={TEXTS.shippingAddrLabel} v={ship.addr || "-"} />
+          <SummaryRow k={TEXTS.shippingPhoneLabel} v={ship.phone || "-"} />
+          {order.bundlePhone?.trim() && <SummaryRow k={TEXTS.bundleShippingTitle} v={`${order.bundleName?.trim() || "-"} · ${order.bundlePhone}`} />}
+        </Card>
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
+          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
+          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
+          <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
+          {order.aiSurchargeAmount > 0 && <SummaryRow k="AI 추가 수정비" v={won(order.aiSurchargeAmount)} />}
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 14, fontWeight: 900 }}>{TEXTS.grandTotalLabel}</span>
+            <span style={{ fontSize: 17, fontWeight: 900, color: "var(--stamp)" }}>{won(grandTotal)}</span>
+          </div>
+        </Card>
+      </div>
+      {/* 버튼 2개 → 오른쪽 정렬, 진행 버튼이 맨 오른쪽 */}
+      <div style={{ padding: "8px 18px 18px", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={back} style={{ flex: 1, background: "var(--paper-white)", border: "1.5px solid var(--line)", color: "var(--ink)", borderRadius: 12, padding: "13px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>고칠게요</button>
+        <button onClick={() => go("payment")} style={{ flex: 2, background: "var(--stamp)", border: "none", color: "#fff", borderRadius: 12, padding: "13px 0", fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>맞아요, 결제하기</button>
+      </div>
+    </div>
+  );
+}
+
 function Payment({ order, patch, go, back, paper, category, unit, optTotal, shipFee, goodsTotal, grandTotal }) {
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [validationMsg, setValidationMsg] = useState("");
@@ -5064,6 +5122,10 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
   const [paymentMethod, setPaymentMethod] = useState("bank"); // "card" | "kakao" | "bank"
   const [payStage, setPayStage] = useState("idle"); // "idle" | "processing" | "success" | "failure"
   const optLines = Object.entries(order.selOptions)
+    .map(([code, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === code), sel))
+    .filter(Boolean);
+  const extraOptLines = Object.entries(order.selOptions)
+    .filter(([code]) => code !== "OPT001")
     .map(([code, sel]) => describeSelectedOption(OPTIONS.find((o) => o.code === code), sel))
     .filter(Boolean);
 
@@ -5140,7 +5202,10 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
           <SummaryRow k={TEXTS.summaryCategoryLabel} v={category?.name} />
           <SummaryRow k={TEXTS.summaryPaperLabel} v={paper?.name} />
           {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
-          <SummaryRow k={TEXTS.summaryOptionLabel} v={optLines.length ? optLines.join(", ") : TEXTS.summaryNone} />
+          {/* 2026-11-25 사장님 — 단면/양면은 필수 선택이라 항상 표시. 다른 옵션은 고른 것만 */}
+          <SummaryRow k="인쇄 방식" v={order.selOptions?.OPT001?.choice === "double" ? "양면" : "단면"} />
+          {extraOptLines.length > 0 && <SummaryRow k={TEXTS.summaryOptionLabel} v={extraOptLines.join(", ")} />}
+          {order.specialOrderFile?.name && <SummaryRow k="인쇄 파일" v={order.specialOrderFile.name} />}
           <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
           <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
         </Card>
@@ -9623,6 +9688,8 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     if (testSeed?.step) return testSeed.step;
     const rec = order.phone ? loadAiUsageRecord(order.phone) : null;
     if (rec?.unpaidAiFee > 0) return "unpaidFeeGate";
+    // 2026-11-25 사장님 확인 — 특별회원(디자이너)은 디자인 과정 없음: 인쇄옵션 다음 바로 인쇄파일 올리기 → 미리보기 → 배송·결제(주문내역 확인)
+    if (order.memberType === "special") return "finishedFileUpload";
     return "designStart";
   });
   const [status, setStatus] = useState("DRAFT");
@@ -10727,7 +10794,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     logoTextCheck: "이 로고 안에 회사명 글자가 이미 들어있나요?",
     logoNewCompanyText: "로고에 회사명을 함께 넣어 만들까요?",
     expressLogoConfirm: "이 로고가 맞나요?",
-    finishedFileUpload: "완성된 명함 파일을 올려주세요.",
+    finishedFileUpload: "완성된 명함 인쇄 파일을 올려주세요. 파일을 읽어서 미리 보여 드릴게요.",
     finishedFileCheck: "인쇄 가능 여부를 확인하고 있어요.",
     finishedFilePreview: "업로드하신 파일을 확인해주세요.",
     replicateUploadScan: "명함을 화면의 사각형 안에 맞춰 찍어 주세요. 찍어 둔 사진이나 스캔 파일이 있으면 올려 주셔도 돼요.",
@@ -13000,7 +13067,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
   return (
     <ComposerSlotContext.Provider value={composerSlot}>
     <div className="app-body" style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}>
-      <TopBar title={step === "templateChoice" ? "명함 유형 선택" : "AI 디자인 상담"} sub={step === "templateChoice" ? null : `상태: ${CHAT_STATUS_LABEL[status]}`} onBack={handleBack} go={go} />
+      <TopBar title={step === "templateChoice" ? "명함 유형 선택" : order.memberType === "special" ? "인쇄 파일 올리기" : "AI 디자인 상담"} sub={step === "templateChoice" ? null : `상태: ${CHAT_STATUS_LABEL[status]}`} onBack={handleBack} go={go} />
       {/* 대화가 짧아도 입력칸이 화면 맨 아래에 있도록 대화 영역이 남는 높이를 채움 */}
       <div style={{ padding: "10px 16px 20px", flex: "1 0 auto" }}>
         <div ref={topRef} />
@@ -13234,7 +13301,7 @@ function Shipping({ order, patch, go, back, freeShip }) {
         </Card>
       </div>
       <div style={{ padding: "8px 18px 18px" }}>
-        <PrimaryButton disabled={!canNext} onClick={() => go("payment")}>{TEXTS.nextPayment}</PrimaryButton>
+        <PrimaryButton disabled={!canNext} onClick={() => go("orderReview")}>다음: 주문내역 확인</PrimaryButton>
         {!canNext && (
           <div style={{ fontSize: 11, color: "var(--ink-soft)", textAlign: "center", marginTop: 8 }}>
             {TEXTS.missingFieldsHint}
@@ -14398,12 +14465,13 @@ function App() {
             화면에서 완전히 없애지 않고 CSS로 숨겨만 둬서, 뒤로 돌아왔을 때 하던
             작업 그대로 남아있게 했습니다. (더 앞 단계인 용지선택으로 돌아가면 그때는
             정상적으로 사라집니다 — 그건 실제로 새로 시작하는 게 맞는 흐름입니다.) */}
-        {(screen === "design" || screen === "shipping" || screen === "payment" || screen === "complete") && (
+        {(screen === "design" || screen === "shipping" || screen === "orderReview" || screen === "payment" || screen === "complete") && (
           <div style={{ display: screen === "design" ? "block" : "none" }}>
             <AiConsultDesign order={order} patch={patch} go={go} back={back} />
           </div>
         )}
         {screen === "shipping" && <Shipping order={order} patch={patch} go={go} back={back} freeShip={freeShip} />}
+        {screen === "orderReview" && <OrderReview order={order} go={go} back={back} paper={paper} category={category} unit={unit} optTotal={optTotal} shipFee={shipFee} grandTotal={grandTotal} />}
         {screen === "payment" && <Payment order={order} patch={patch} go={go} back={back} paper={paper} category={category} unit={unit} optTotal={optTotal} shipFee={shipFee} goodsTotal={goodsTotal} grandTotal={grandTotal} />}
         {screen === "complete" && <Complete order={order} go={go} grandTotal={grandTotal} category={category} />}
         {screen === "inquiry" && <Inquiry order={order} go={go} back={back} />}
