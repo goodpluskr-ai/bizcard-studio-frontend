@@ -4995,6 +4995,7 @@ function buildOrderSummary(order, extra = {}) {
     extra.paperName && `용지: ${extra.paperName}`,
     order.sets && `수량: ${order.sets}세트${(order.caseCount || 1) > 1 ? ` × ${order.caseCount}건 (건마다 ${order.sets}세트)` : ""}`,
     order.specialBulkFiles?.length && `\n[인쇄 파일 ${order.specialBulkFiles.length}개 — 원본은 파일마다 따로 메일로 갑니다]\n${order.specialBulkFiles.map((f) => `${f.label}: ${f.name}`).join("\n")}${order.sharedBack ? "\n(뒷면은 모든 건 공통)" : ""}`,
+    extra.fileLinks?.length && `\n[인쇄 원본 파일 ${extra.fileLinks.length}개 — 링크는 30일 동안 내려받을 수 있어요]\n${extra.fileLinks.map((f) => `${f.label}: ${f.name}\n  ${f.url || "(링크 만들기 실패 — 저장소 경로 " + f.path + ")"}`).join("\n")}${order.sharedBack ? "\n(뒷면은 모든 건 공통)" : ""}`,
     extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
     extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
     order.depositor && `입금자명: ${order.depositor}`,
@@ -5083,6 +5084,7 @@ function SpecialBulkUpload({ doubleSided, onDone }) {
   const [sharedBack, setSharedBack] = useState(null);
   const [useShared, setUseShared] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
   const [err, setErr] = useState("");
   const slotOf = async (f) => {
     f = await readableImageFile(f).catch(() => f);
@@ -5184,14 +5186,41 @@ function SpecialBulkUpload({ doubleSided, onDone }) {
         </div>
       )}
       {cases.length > 0 && (
-        <button disabled={!ready} onClick={() => onDone(cases.map((c) => ({ front: c.front, back: doubleSided ? (useShared ? sharedBack : c.back) : null })), doubleSided && useShared)}
+        <button disabled={!ready} onClick={async () => { setBusy(true); try { await onDone(cases.map((c) => ({ front: c.front, back: doubleSided ? (useShared ? sharedBack : c.back) : null })), doubleSided && useShared, setProgress); } finally { setBusy(false); setProgress(""); } }}
           style={{ width: "100%", background: ready ? "var(--stamp)" : "var(--line)", border: "none", color: "#fff", borderRadius: 10, padding: "12px 0", fontSize: 13.5, fontWeight: 700, cursor: ready ? "pointer" : "default", fontFamily: "inherit" }}>
-          {ready ? `${cases.length}건으로 주문할게요` : "빠진 파일을 채워 주세요"}
+          {busy && progress ? progress : ready ? `${cases.length}건으로 주문할게요` : "빠진 파일을 채워 주세요"}
         </button>
       )}
     </div>
   );
 }
+// 2026-11-25 — 주문 원본 파일 저장소: 서버에서 한 번 쓰는 올리기 주소를 받아 브라우저가 저장소에 직접 올림.
+// 메일에는 내려받기 링크만 넣음(메일 첨부 1개·크기 제한 문제 해결). 실패하면 null → 예전처럼 메일 첨부로
+async function uploadOrderFile(file) {
+  const type = file.type || (/\.pdf$/i.test(file.name || "") ? "application/pdf" : "image/jpeg");
+  const r = await fetch(`${RENDER_API_BASE}/api/order-files/upload-url`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName: file.name, contentType: type, size: file.size }),
+  });
+  if (!r.ok) throw new Error(`올리기 주소 실패 ${r.status}`);
+  const { path, signedUrl } = await r.json();
+  const up = await fetch(signedUrl, { method: "PUT", headers: { "content-type": type, "x-upsert": "false" }, body: file });
+  if (!up.ok) throw new Error(`저장소 올리기 실패 ${up.status}`);
+  return path;
+}
+async function orderFileLinks(paths) {
+  const r = await fetch(`${RENDER_API_BASE}/api/order-files/download-links`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths }),
+  });
+  if (!r.ok) throw new Error(`링크 실패 ${r.status}`);
+  return (await r.json()).links || [];
+}
+function dataUrlToFile(dataUrl, name) {
+  const [head, b64] = dataUrl.split(","); const type = /data:([^;]+)/.exec(head)?.[1] || "application/octet-stream";
+  const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new File([u8], name, { type });
+}
+
 // 관리자 확인용: 모든 건을 한 장에(줄마다 1건: 앞면 | 뒷면)
 async function bulkSheetDataUrl(items) {
   const load = (u) => new Promise((ok) => { if (!u) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = u; });
@@ -5294,7 +5323,7 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
 
   // 결제수단과 무관하게 실제로 동작하는 주문 접수 로직 — 원래 있던 코드 그대로,
   // 카드/카카오페이 "결제 성공" 더미 화면 뒤에서도 동일하게 호출됩니다.
-  const submitOrder = () => {
+  const submitOrder = async () => {
     // 실제 서비스에서는 이 주문번호를 서버가 발급해야 합니다.
     // 지금은 프론트엔드 프로토타입이라 임시로 생성하고, 새로고침 전까지는 값이 바뀌지 않도록 order 상태에 저장해둡니다.
     const orderNo = `BC${Date.now().toString().slice(-8)}`;
@@ -5312,12 +5341,20 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
     const attachment = order.printFileSvg
       ? { dataUrl: svgToDataUrl(order.printFileSvg) }
       : (order.specialOrderFile || null);
+    // 2026-11-25 — 저장소에 올린 원본은 내려받기 링크(30일)를 메일 본문에
+    let fileLinks = null;
+    if (order.orderFiles?.length) {
+      try {
+        const links = await orderFileLinks(order.orderFiles.map((f) => f.path));
+        fileLinks = order.orderFiles.map((f) => ({ ...f, url: links.find((l) => l.path === f.path)?.url || null }));
+      } catch (e) { console.error("내려받기 링크 실패:", e); fileLinks = order.orderFiles.map((f) => ({ ...f, url: null })); }
+    }
     sendOrderNotificationEmail(order, orderNo, {
       categoryName: category?.name, paperName: paper?.name,
       optionsSummary: optLines.length ? optLines.join(", ") : null,
-      totalPrice: grandTotal,
+      totalPrice: grandTotal, fileLinks,
     }, attachment).catch((err) => console.error("주문 알림 이메일 발송 실패:", err));
-    // 2026-11-25 — 특별회원 여러 건: 메일 첨부가 1개라 원본 파일은 파일마다 따로 보냄 (임시 — 파일 저장소 붙이면 링크로)
+    // 저장소를 못 쓴 경우에만: 메일 첨부가 1개라 원본 파일은 파일마다 따로 보냄
     (order.specialBulkFiles || []).forEach((f, i) => {
       setTimeout(() => sendOrderNotificationEmail({ ...order, specialBulkFiles: null }, `${orderNo} [${f.label}] ${f.name}`, { optionsSummary: `원본 파일 ${i + 1}/${order.specialBulkFiles.length}` }, { dataUrl: f.dataUrl })
         .catch((err) => console.error("원본 파일 메일 실패:", f.label, err)), 1500 * (i + 1));
@@ -11188,25 +11225,34 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
       }
       case "specialBulkUpload":
         return <SpecialBulkUpload doubleSided={order.selOptions?.OPT001?.choice === "double"}
-          onDone={async (items, sharedBack) => {
-            const files = await Promise.all(items.flatMap((it, i) => [
+          onDone={async (items, sharedBack, setProgress) => {
+            const picked = items.flatMap((it, i) => [
               ["앞면", it.front], ...(it.back && !(sharedBack && i > 0) ? [[sharedBack ? "공통 뒷면" : "뒷면", it.back]] : []),
-            ].map(async ([side, sl]) => ({ label: side === "공통 뒷면" ? side : `${i + 1}건 ${side}`, name: sl.name, dataUrl: await fileToBase64DataUrl(sl.file) }))));
+            ].map(([side, sl]) => ({ label: side === "공통 뒷면" ? side : `${i + 1}건 ${side}`, name: sl.name, file: sl.file })));
+            // 원본은 저장소에 올림(메일엔 링크). 하나라도 실패하면 예전 방식(파일마다 메일 첨부)으로
+            let stored = [];
+            try {
+              for (let k = 0; k < picked.length; k++) {
+                setProgress?.(`파일 올리는 중… ${k + 1}/${picked.length}`);
+                stored.push({ label: picked[k].label, name: picked[k].name, path: await uploadOrderFile(picked[k].file) });
+              }
+            } catch (e) { console.error("[주문 파일 저장소] 실패 — 메일 첨부로 대신:", e); stored = null; }
+            const files = stored ? null : await Promise.all(picked.map(async (f) => ({ label: f.label, name: f.name, dataUrl: await fileToBase64DataUrl(f.file) })));
             let sheet = null; try { sheet = await bulkSheetDataUrl(items); } catch { sheet = null; }
             patch({
-              caseCount: items.length, sharedBack: !!sharedBack, specialBulkFiles: files,
-              specialOrderFile: sheet ? { dataUrl: sheet, name: `인쇄파일_${items.length}건_미리보기.jpg` } : files[0] || null,
-              designRecipe: { kind: "specialBulk", cases: items.length, sharedBack: !!sharedBack, files: files.map((f) => ({ label: f.label, name: f.name })) },
+              caseCount: items.length, sharedBack: !!sharedBack, specialBulkFiles: files, orderFiles: stored,
+              specialOrderFile: sheet ? { dataUrl: sheet, name: `인쇄파일_${items.length}건_미리보기.jpg` } : (files?.[0] || null),
+              designRecipe: { kind: "specialBulk", cases: items.length, sharedBack: !!sharedBack, files: (stored || files).map((f) => ({ label: f.label, name: f.name, path: f.path || null })) },
             });
             commit(`${items.length}건 올렸어요`, "specialBulkConfirm");
           }} />;
       case "specialBulkConfirm":
         return <ChatConfirmCard title="이 파일들로 주문할까요?"
           rows={[{ k: "건수", v: `${order.caseCount || 1}건` }, { k: "인쇄", v: order.selOptions?.OPT001?.choice === "double" ? (order.sharedBack ? "양면 (뒷면 공통)" : "양면") : "단면" },
-            { k: "파일", v: `${(order.specialBulkFiles || []).length}개` }, { k: "안내", v: "해상도·도련은 관리자가 최종 확인해요. 세트 수는 모든 건이 같아요" }]}
+            { k: "파일", v: `${(order.orderFiles || order.specialBulkFiles || []).length}개${order.orderFiles ? " (안전하게 저장됨)" : ""}` }, { k: "안내", v: "해상도·도련은 관리자가 최종 확인해요. 세트 수는 모든 건이 같아요" }]}
           applyLabel="네, 이대로 진행" retryLabel="다시 올리기"
           onApply={() => go("shipping")}
-          onRetry={() => { patch({ caseCount: 1, specialBulkFiles: null, specialOrderFile: null }); setLog((l) => l.slice(0, -1)); setStep("specialBulkUpload"); }} />;
+          onRetry={() => { patch({ caseCount: 1, specialBulkFiles: null, orderFiles: null, specialOrderFile: null }); setLog((l) => l.slice(0, -1)); setStep("specialBulkUpload"); }} />;
       case "finishedFileUpload":
         return (
           <>
@@ -11267,7 +11313,9 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
               retryLabel="다시 올리기"
               onApply={async () => {
                 const dataUrl = await fileToBase64DataUrl(finishedFile);
-                patch({ specialOrderFile: { dataUrl, name: finishedFile.name } });
+                let stored = null;
+                try { stored = [{ label: "인쇄 파일", name: finishedFile.name, path: await uploadOrderFile(finishedFile) }]; } catch (e) { console.error("[주문 파일 저장소] 실패 — 메일 첨부로 대신:", e); }
+                patch({ specialOrderFile: { dataUrl, name: finishedFile.name }, orderFiles: stored });
                 go("shipping");
               }}
               onRetry={() => { setLog((l) => l.slice(0, -1)); setStep("finishedFileUpload"); }}
