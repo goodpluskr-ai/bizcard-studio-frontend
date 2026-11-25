@@ -4993,7 +4993,8 @@ function buildOrderSummary(order, extra = {}) {
   const lines = [
     extra.categoryName && `카테고리: ${extra.categoryName}`,
     extra.paperName && `용지: ${extra.paperName}`,
-    order.sets && `수량: ${order.sets}세트`,
+    order.sets && `수량: ${order.sets}세트${(order.caseCount || 1) > 1 ? ` × ${order.caseCount}건 (건마다 ${order.sets}세트)` : ""}`,
+    order.specialBulkFiles?.length && `\n[인쇄 파일 ${order.specialBulkFiles.length}개 — 원본은 파일마다 따로 메일로 갑니다]\n${order.specialBulkFiles.map((f) => `${f.label}: ${f.name}`).join("\n")}${order.sharedBack ? "\n(뒷면은 모든 건 공통)" : ""}`,
     extra.optionsSummary && `옵션: ${extra.optionsSummary}`,
     extra.totalPrice != null && `결제금액: ${extra.totalPrice.toLocaleString()}원`,
     order.depositor && `입금자명: ${order.depositor}`,
@@ -5062,6 +5063,154 @@ async function sendOrderNotificationEmail(order, orderNo, extra = {}, attachment
   }
 }
 
+
+// ==================== 2026-11-25 특별회원: 여러 사람 명함 한 번에 (건수) ====================
+// 사장님 확정: 한 주문 = 같은 옵션. 건수 = 같은 옵션의 서로 다른 사람 명함, 세트 = 한 명함의 수량(모든 건 동일).
+// 양면이면 건마다 앞·뒷면(뒷면 공통이면 뒷면 1개). 압축파일(ZIP)은 받지 않음(다음 기회).
+// 파일은 여러 개 한꺼번에 고름 → 이름에 '앞/뒤(front/back)'가 있으면 같은 이름끼리 짝, 없으면 고른 순서대로 칸을 채움
+function bulkSideOf(name) {
+  const n = (name || "").replace(/\.[^.]+$/, "").toLowerCase();
+  if (/뒷면|뒤|back/.test(n)) return "back";
+  if (/앞면|앞|front/.test(n)) return "front";
+  return null;
+}
+function bulkKeyOf(name) {
+  return (name || "").replace(/\.[^.]+$/, "").replace(/앞면|뒷면|앞|뒤|front|back/gi, "").replace(/[\s_\-.()]+/g, " ").trim().toLowerCase();
+}
+function SpecialBulkUpload({ doubleSided, onDone }) {
+  // cases: [{ front: slot|null, back: slot|null }]  slot = { file, name, thumb }
+  const [cases, setCases] = useState([]);
+  const [sharedBack, setSharedBack] = useState(null);
+  const [useShared, setUseShared] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const slotOf = async (f) => {
+    f = await readableImageFile(f).catch(() => f);
+    let thumb = null;
+    try { thumb = (await cardScanLoadImage(f, 900)).url; } catch { thumb = null; }
+    return { file: f, name: f.name, thumb };
+  };
+  const addFiles = async (list) => {
+    const files = [...list].filter((f) => /^image\/|application\/pdf/.test(f.type || "") || /\.(pdf|jpe?g|png|heic|heif)$/i.test(f.name || ""));
+    if (!files.length) { setErr("그림 파일(JPG·PNG)이나 PDF만 올릴 수 있어요. 압축파일은 받지 않아요."); return; }
+    setErr(""); setBusy(true);
+    const slots = await Promise.all(files.sort((a, b) => a.name.localeCompare(b.name, "ko")).map(slotOf));
+    // 공통 뒷면은 칸 채우기 전에 따로 뺌 (상태 갱신 함수는 나중에 돌 수 있어 그 안에서 고르면 안 됨)
+    const isSharedBack = (sl) => doubleSided && useShared && bulkSideOf(sl.name) === "back";
+    const shared = slots.find(isSharedBack) || null;
+    const rest = slots.filter((sl) => !isSharedBack(sl));
+    setCases((prev) => {
+      const next = prev.map((c) => ({ ...c }));
+      const byKey = {};
+      next.forEach((c, i) => { const k = bulkKeyOf((c.front || c.back)?.name); if (k) byKey[k] = i; });
+      const put = (i, side, sl) => { next[i][side] = sl; const k = bulkKeyOf(sl.name); if (k && byKey[k] == null) byKey[k] = i; };
+      for (const sl of rest) {
+        let side = doubleSided ? bulkSideOf(sl.name) : "front";
+        if (doubleSided && useShared) side = "front";
+        const k = bulkKeyOf(sl.name);
+        if (side && k && byKey[k] != null && !next[byKey[k]][side]) { put(byKey[k], side, sl); continue; }
+        if (!side) side = next.some((c) => c.front && !c.back) ? "back" : "front"; // 이름에 앞/뒤 없음: 고른 순서대로 앞→뒤
+        const want = side === "back" ? next.findIndex((c) => c.front && !c.back) : next.findIndex((c) => !c.front);
+        if (want >= 0) { put(want, side, sl); continue; }
+        next.push({ front: null, back: null }); put(next.length - 1, side, sl);
+      }
+      return next;
+    });
+    if (shared) setSharedBack(shared);
+    setBusy(false);
+  };
+  const setSlot = async (i, side, f) => { if (!f) return; const sl = await slotOf(f); setCases((cs) => cs.map((c, k) => (k === i ? { ...c, [side]: sl } : c))); };
+  const swap = (i) => setCases((cs) => cs.map((c, k) => (k === i ? { front: c.back, back: c.front } : c)));
+  const remove = (i) => setCases((cs) => cs.filter((_, k) => k !== i));
+  const missing = [];
+  cases.forEach((c, i) => {
+    if (!c.front) missing.push(`${i + 1}건 앞면`);
+    if (doubleSided && !useShared && !c.back) missing.push(`${i + 1}건 뒷면`);
+  });
+  if (doubleSided && useShared && !sharedBack) missing.push("공통 뒷면");
+  const ready = cases.length > 0 && !missing.length && !busy;
+  const box = { flex: 1, minWidth: 0, border: "1.5px dashed var(--line)", borderRadius: 8, background: "var(--paper-white)", position: "relative", overflow: "hidden", minHeight: 64, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, color: "var(--ink-soft)", textAlign: "center" };
+  const cover = { position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" };
+  const slotView = (sl, label, onPick) => (
+    <label style={box}>
+      {sl ? (sl.thumb ? <img src={sl.thumb} alt={label} style={{ width: "100%", display: "block" }} /> : <span style={{ padding: 6 }}>{sl.name}</span>) : <span>+ {label}</span>}
+      <span style={{ position: "absolute", left: 4, top: 4, background: "rgba(0,0,0,.55)", color: "#fff", fontSize: 10, borderRadius: 4, padding: "1px 5px" }}>{label}</span>
+      <input type="file" accept="image/*,application/pdf,.pdf" style={cover} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; onPick(f); }} />
+    </label>
+  );
+  const small = { background: "none", border: "none", color: "var(--ink-soft)", fontSize: 11.5, textDecoration: "underline", cursor: "pointer", fontFamily: "inherit", padding: 0 };
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ background: "var(--paper-deep)", borderRadius: 10, padding: "10px 12px", fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.7, marginBottom: 10 }}>
+        <b style={{ color: "var(--ink)" }}>여러 사람 명함을 한 번에 올릴 수 있어요</b> (같은 옵션만 · 옵션이 다르면 주문을 따로 넣어 주세요)<br />
+        · 파일을 여러 개 한꺼번에 고르세요. 한 사람 = 1건{doubleSided ? " (앞면·뒷면)" : ""}<br />
+        {doubleSided && <>· 파일 이름에 '앞', '뒤'를 넣으면 자동으로 짝지어요 (예: 홍길동_앞.pdf, 홍길동_뒤.pdf)<br /></>}
+        · JPG·PNG·PDF (압축파일은 받지 않아요)
+      </div>
+      {doubleSided && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, marginBottom: 10, cursor: "pointer" }}>
+          <input type="checkbox" checked={useShared} onChange={(e) => setUseShared(e.target.checked)} /> 뒷면은 모든 건이 같은 그림이에요
+        </label>
+      )}
+      {cases.map((c, i) => (
+        <div key={i} data-bulk-case={i + 1} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 8, marginBottom: 8, background: "var(--paper-white)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <b style={{ fontSize: 12.5 }}>{i + 1}건</b>
+            <span style={{ display: "flex", gap: 10 }}>
+              {doubleSided && !useShared && <button style={small} onClick={() => swap(i)}>앞뒤 바꾸기</button>}
+              <button style={small} onClick={() => remove(i)}>이 건 빼기</button>
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {slotView(c.front, "앞면", (f) => setSlot(i, "front", f))}
+            {doubleSided && !useShared && slotView(c.back, "뒷면", (f) => setSlot(i, "back", f))}
+          </div>
+        </div>
+      ))}
+      {doubleSided && useShared && (
+        <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 8, marginBottom: 8, background: "var(--paper-white)" }}>
+          <b style={{ fontSize: 12.5, display: "block", marginBottom: 6 }}>공통 뒷면 (모든 건)</b>
+          <div style={{ display: "flex" }}>{slotView(sharedBack, "공통 뒷면", async (f) => { if (f) setSharedBack(await slotOf(f)); })}</div>
+        </div>
+      )}
+      <label style={{ display: "block", position: "relative", border: "1.5px dashed var(--stamp)", borderRadius: 10, padding: "12px 0", textAlign: "center", fontSize: 13, fontWeight: 700, color: "var(--stamp)", background: "var(--paper-white)", cursor: "pointer", marginBottom: 8 }}>
+        {busy ? "파일을 읽는 중…" : cases.length ? "+ 파일 더 올리기" : "파일 고르기 (여러 개 한꺼번에)"}
+        <input type="file" multiple accept="image/*,application/pdf,.pdf" aria-label="인쇄 파일 여러 개 올리기" style={cover} onChange={(e) => { const fs = [...(e.target.files || [])]; e.target.value = ""; if (fs.length) addFiles(fs); }} />
+      </label>
+      {err && <div style={{ fontSize: 12, color: "var(--stamp)", marginBottom: 6 }}>{err}</div>}
+      {cases.length > 0 && (
+        <div style={{ fontSize: 12.5, color: missing.length ? "var(--stamp)" : "var(--ink)", marginBottom: 8, textAlign: "right" }}>
+          {missing.length ? `빠진 파일: ${missing.join(", ")}` : `모두 ${cases.length}건${doubleSided ? (useShared ? " · 양면(뒷면 공통)" : " · 양면") : " · 단면"}`}
+        </div>
+      )}
+      {cases.length > 0 && (
+        <button disabled={!ready} onClick={() => onDone(cases.map((c) => ({ front: c.front, back: doubleSided ? (useShared ? sharedBack : c.back) : null })), doubleSided && useShared)}
+          style={{ width: "100%", background: ready ? "var(--stamp)" : "var(--line)", border: "none", color: "#fff", borderRadius: 10, padding: "12px 0", fontSize: 13.5, fontWeight: 700, cursor: ready ? "pointer" : "default", fontFamily: "inherit" }}>
+          {ready ? `${cases.length}건으로 주문할게요` : "빠진 파일을 채워 주세요"}
+        </button>
+      )}
+    </div>
+  );
+}
+// 관리자 확인용: 모든 건을 한 장에(줄마다 1건: 앞면 | 뒷면)
+async function bulkSheetDataUrl(items) {
+  const load = (u) => new Promise((ok) => { if (!u) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = u; });
+  const rows = await Promise.all(items.map(async (it) => [await load(it.front?.thumb), await load(it.back?.thumb)]));
+  const cw = 600, ch = 340, pad = 20, lab = 40, cols = items.some((it) => it.back) ? 2 : 1;
+  const c = document.createElement("canvas"); c.width = pad + cols * (cw + pad); c.height = pad + rows.length * (lab + ch + pad);
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.font = "bold 26px sans-serif"; g.fillStyle = "#333";
+  rows.forEach(([a, b], i) => {
+    const y = pad + i * (lab + ch + pad);
+    [[a, "앞면"], [b, "뒷면"]].slice(0, cols).forEach(([im, t], j) => {
+      const x = pad + j * (cw + pad);
+      g.fillStyle = "#333"; g.fillText(`${i + 1}건 ${t}`, x, y + 28);
+      if (im) { const s = Math.min(cw / im.naturalWidth, ch / im.naturalHeight); g.drawImage(im, x, y + lab, im.naturalWidth * s, im.naturalHeight * s); }
+      else { g.strokeStyle = "#bbb"; g.strokeRect(x, y + lab, cw, ch); g.fillText("(미리보기 없음)", x + 20, y + lab + 60); }
+    });
+  });
+  return c.toDataURL("image/jpeg", 0.85);
+}
+
 // ==================== screens/Payment ====================
 // 2026-11-25 사장님 요청 — 결제 전에 일반·특별회원 모두 주문내역을 한 화면에서 확인.
 // 인쇄 방식(단면/양면)은 필수라 항상 표시, 다른 옵션은 고른 것만
@@ -5090,7 +5239,8 @@ function OrderReview({ order, go, back, paper, category, unit, optTotal, shipFee
           {order.paperChoice && <SummaryRow k={TEXTS.summaryPaperOptionLabel} v={order.paperChoice} />}
           <SummaryRow k="인쇄 방식" v={order.selOptions?.OPT001?.choice === "double" ? "양면" : "단면"} />
           {extra.length > 0 && <SummaryRow k={TEXTS.summaryOptionLabel} v={extra.join(", ")} />}
-          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
+          {(order.caseCount || 1) > 1 && <SummaryRow k="건수" v={`${order.caseCount}건 (같은 옵션, 서로 다른 명함)`} />}
+          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}${(order.caseCount || 1) > 1 ? " (건마다)" : ""}`} />
           <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
         </Card>
         <Card style={{ marginBottom: 12 }}>
@@ -5102,8 +5252,8 @@ function OrderReview({ order, go, back, paper, category, unit, optTotal, shipFee
         </Card>
         <Card style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
-          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
-          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
+          <SummaryRow k={TEXTS.unitPriceLabel(order.sets) + ((order.caseCount || 1) > 1 ? ` × ${order.caseCount}건` : "")} v={won(unit * order.sets * (order.caseCount || 1))} />
+          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets) + ((order.caseCount || 1) > 1 ? ` × ${order.caseCount}건` : "")} v={won(optTotal * order.sets * (order.caseCount || 1))} />}
           <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
           {order.aiSurchargeAmount > 0 && <SummaryRow k="AI 추가 수정비" v={won(order.aiSurchargeAmount)} />}
           <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
@@ -5167,6 +5317,11 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
       optionsSummary: optLines.length ? optLines.join(", ") : null,
       totalPrice: grandTotal,
     }, attachment).catch((err) => console.error("주문 알림 이메일 발송 실패:", err));
+    // 2026-11-25 — 특별회원 여러 건: 메일 첨부가 1개라 원본 파일은 파일마다 따로 보냄 (임시 — 파일 저장소 붙이면 링크로)
+    (order.specialBulkFiles || []).forEach((f, i) => {
+      setTimeout(() => sendOrderNotificationEmail({ ...order, specialBulkFiles: null }, `${orderNo} [${f.label}] ${f.name}`, { optionsSummary: `원본 파일 ${i + 1}/${order.specialBulkFiles.length}` }, { dataUrl: f.dataUrl })
+        .catch((err) => console.error("원본 파일 메일 실패:", f.label, err)), 1500 * (i + 1));
+    });
     go("complete");
   };
 
@@ -5219,14 +5374,15 @@ function Payment({ order, patch, go, back, paper, category, unit, optTotal, ship
           <SummaryRow k="인쇄 방식" v={order.selOptions?.OPT001?.choice === "double" ? "양면" : "단면"} />
           {extraOptLines.length > 0 && <SummaryRow k={TEXTS.summaryOptionLabel} v={extraOptLines.join(", ")} />}
           {order.specialOrderFile?.name && <SummaryRow k="인쇄 파일" v={order.specialOrderFile.name} />}
-          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}`} />
+          {(order.caseCount || 1) > 1 && <SummaryRow k="건수" v={`${order.caseCount}건 (같은 옵션, 서로 다른 명함)`} />}
+          <SummaryRow k={TEXTS.summarySetLabel} v={`${order.sets}${TEXTS.summarySetSuffix}${(order.caseCount || 1) > 1 ? " (건마다)" : ""}`} />
           <SummaryRow k={TEXTS.summaryMemberTypeLabel} v={order.memberType === "special" ? TEXTS.memberTypeSpecial : TEXTS.memberTypeGeneral} />
         </Card>
 
         <Card style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{TEXTS.paymentAmountTitle}</div>
-          <SummaryRow k={TEXTS.unitPriceLabel(order.sets)} v={won(unit * order.sets)} />
-          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets)} v={won(optTotal * order.sets)} />}
+          <SummaryRow k={TEXTS.unitPriceLabel(order.sets) + ((order.caseCount || 1) > 1 ? ` × ${order.caseCount}건` : "")} v={won(unit * order.sets * (order.caseCount || 1))} />
+          {optTotal > 0 && <SummaryRow k={TEXTS.optionPriceLabel(order.sets) + ((order.caseCount || 1) > 1 ? ` × ${order.caseCount}건` : "")} v={won(optTotal * order.sets * (order.caseCount || 1))} />}
           <SummaryRow k={TEXTS.shippingFeeLabel} v={shipFee === 0 ? TEXTS.shippingFeeFree : won(shipFee)} />
           {order.bundlePhone?.trim() && <SummaryRow k={TEXTS.bundleShippingTitle} v={`${order.bundleName?.trim() || "-"} · ${order.bundlePhone}`} />}
           {order.aiSurchargeAmount > 0 && <SummaryRow k="AI 추가 수정비" v={won(order.aiSurchargeAmount)} />}
@@ -9711,7 +9867,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     const rec = order.phone ? loadAiUsageRecord(order.phone) : null;
     if (rec?.unpaidAiFee > 0) return "unpaidFeeGate";
     // 2026-11-25 사장님 확인 — 특별회원(디자이너)은 디자인 과정 없음: 인쇄옵션 다음 바로 인쇄파일 올리기 → 미리보기 → 배송·결제(주문내역 확인)
-    if (order.memberType === "special") return "finishedFileUpload";
+    if (order.memberType === "special") return "specialBulkUpload";
     return "designStart";
   });
   const [status, setStatus] = useState("DRAFT");
@@ -10304,7 +10460,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     editDecorationChoice: "선·띠 변경 여부", editDecorations: "선·띠 편집",
     unpaidFeeGate: "미결제 AI 작업비", designStart: "시작 방법 선택", resumeUnavailable: "이어서 작업 불가 안내",
     expressLogoUpload: "로고 업로드", expressLogoConfirm: "로고 확인",
-    finishedFileUpload: "완성파일 업로드", finishedFileCheck: "인쇄가능 확인", finishedFilePreview: "완성파일 미리보기",
+    finishedFileUpload: "완성파일 업로드", specialBulkUpload: "인쇄 파일 올리기", specialBulkConfirm: "파일 확인", finishedFileCheck: "인쇄가능 확인", finishedFilePreview: "완성파일 미리보기",
     logoScanGuide: "촬영 안내", replicateScanGuide: "촬영 안내",
     replicateUploadScan: "명함 촬영", replicateQualityCheck: "사진 품질 확인", replicateUploadScanBack: "뒷면 촬영", replicateQualityCheckBack: "뒷면 품질 확인", ocrResultReviewBack: "뒷면 글자 확인", replicateLogoArea: "로고 위치", replicateLogoChoice: "로고 준비 방법", replicateLogoAiCompare: "AI 로고 비교", ocrResultReview: "명함 글자 확인", ocrFieldReview: "정보 항목 확인", replicateConfirm: "주문 확인",
     logoSourceChoice: "로고 출처 선택",
@@ -10820,6 +10976,8 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     logoNewCompanyText: "로고에 회사명을 함께 넣어 만들까요?",
     expressLogoConfirm: "이 로고가 맞나요?",
     finishedFileUpload: "완성된 명함 인쇄 파일을 올려주세요. 파일을 읽어서 미리 보여 드릴게요.",
+    specialBulkUpload: "인쇄 파일을 올려 주세요. 같은 옵션이면 여러 사람 명함을 한 번에 올릴 수 있어요.",
+    specialBulkConfirm: "올린 파일을 건별로 정리했어요. 맞으면 배송지로 넘어갈게요.",
     finishedFileCheck: "인쇄 가능 여부를 확인하고 있어요.",
     finishedFilePreview: "업로드하신 파일을 확인해주세요.",
     replicateUploadScan: "명함을 찍어 주세요. 찍어 둔 사진이나 스캔 파일이 있으면 올려 주셔도 돼요.",
@@ -11028,6 +11186,27 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
           </>
         );
       }
+      case "specialBulkUpload":
+        return <SpecialBulkUpload doubleSided={order.selOptions?.OPT001?.choice === "double"}
+          onDone={async (items, sharedBack) => {
+            const files = await Promise.all(items.flatMap((it, i) => [
+              ["앞면", it.front], ...(it.back && !(sharedBack && i > 0) ? [[sharedBack ? "공통 뒷면" : "뒷면", it.back]] : []),
+            ].map(async ([side, sl]) => ({ label: side === "공통 뒷면" ? side : `${i + 1}건 ${side}`, name: sl.name, dataUrl: await fileToBase64DataUrl(sl.file) }))));
+            let sheet = null; try { sheet = await bulkSheetDataUrl(items); } catch { sheet = null; }
+            patch({
+              caseCount: items.length, sharedBack: !!sharedBack, specialBulkFiles: files,
+              specialOrderFile: sheet ? { dataUrl: sheet, name: `인쇄파일_${items.length}건_미리보기.jpg` } : files[0] || null,
+              designRecipe: { kind: "specialBulk", cases: items.length, sharedBack: !!sharedBack, files: files.map((f) => ({ label: f.label, name: f.name })) },
+            });
+            commit(`${items.length}건 올렸어요`, "specialBulkConfirm");
+          }} />;
+      case "specialBulkConfirm":
+        return <ChatConfirmCard title="이 파일들로 주문할까요?"
+          rows={[{ k: "건수", v: `${order.caseCount || 1}건` }, { k: "인쇄", v: order.selOptions?.OPT001?.choice === "double" ? (order.sharedBack ? "양면 (뒷면 공통)" : "양면") : "단면" },
+            { k: "파일", v: `${(order.specialBulkFiles || []).length}개` }, { k: "안내", v: "해상도·도련은 관리자가 최종 확인해요. 세트 수는 모든 건이 같아요" }]}
+          applyLabel="네, 이대로 진행" retryLabel="다시 올리기"
+          onApply={() => go("shipping")}
+          onRetry={() => { patch({ caseCount: 1, specialBulkFiles: null, specialOrderFile: null }); setLog((l) => l.slice(0, -1)); setStep("specialBulkUpload"); }} />;
       case "finishedFileUpload":
         return (
           <>
@@ -14446,7 +14625,8 @@ function App() {
   const bundleShipFree = !!order.bundleName?.trim() && /^\d{9,}$/.test(order.bundlePhone.replace(/[^0-9]/g, ""));
   const freeShip = bundleShipFree;
   const shipFee = freeShip ? 0 : 3000;
-  const goodsTotal = useMemo(() => (unit + optTotal) * order.sets, [unit, optTotal, order.sets]);
+  // 2026-11-25 — 특별회원 여러 건: (단가+옵션) × 세트 × 건수
+  const goodsTotal = useMemo(() => (unit + optTotal) * order.sets * (order.caseCount || 1), [unit, optTotal, order.sets, order.caseCount]);
   const aiSurchargeAmount = order.aiSurchargeAmount || 0; // AI 로고/배경 추가수정 후불누적분(logoAiConsultDesign 참고)
   const grandTotal = useMemo(() => goodsTotal + shipFee + aiSurchargeAmount, [goodsTotal, shipFee, aiSurchargeAmount]);
 
