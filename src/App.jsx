@@ -1321,6 +1321,19 @@ async function isHeifFile(f) {
     return /^ftyp(heic|heix|hevc|hevx|heim|heis|mif1|msf1)/.test(tag);
   } catch { return false; }
 }
+// 2026-11-25 — 양면 샘플: 앞면(위)·뒷면(아래)을 한 장으로 (관리자 메일 첨부 1개용)
+async function stackCardImages(frontUrl, backUrl) {
+  const load = (u) => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = u; });
+  const [a, b] = await Promise.all([load(frontUrl), load(backUrl)]);
+  const W = Math.max(a.naturalWidth, b.naturalWidth), gap = 40, lab = 60;
+  const ha = a.naturalHeight * W / a.naturalWidth, hb = b.naturalHeight * W / b.naturalWidth;
+  const c = document.createElement("canvas"); c.width = W; c.height = Math.round(lab + ha + gap + lab + hb);
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = "#333"; g.font = "bold 40px sans-serif";
+  g.fillText("앞면", 10, 45); g.drawImage(a, 0, lab, W, ha);
+  g.fillText("뒷면", 10, lab + ha + gap + 45); g.drawImage(b, 0, lab + ha + gap + lab, W, hb);
+  return c.toDataURL("image/jpeg", 0.9);
+}
 async function readableImageFile(f) {
   if (!(await isHeifFile(f))) return f;
   const { heicTo } = await import("heic-to");
@@ -9770,6 +9783,9 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
   const [logoMethod, setLogoMethod] = useState(null);
   // 2026-11-24 — 명함 샘플로 주문: "sampleEdit"(3번 디자인 그대로·정보만 바꾸기) / "replicate"(4번 똑같이). 디자인 과정 없음
   const [scanOrderMode, setScanOrderMode] = useState(null);
+  // 2026-11-25 — 인쇄옵션에서 '양면'을 고른 고객만 3·4번에서 뒷면도 찍음(단면은 앞면만). 앞면 결과는 여기 보관
+  const scanBothSides = order.selOptions?.OPT001?.choice === "double";
+  const [frontScan, setFrontScan] = useState(null);
   const [logoFile, setLogoFile] = useState(null);
   // ⚠️ 구조수정(2026-09-04, 사장님 지적: "배경 작업에서 왜 로고 데이터를 빌려가나요?") —
   // logoFile 하나가 "로고 이미지"와 "촬영한 명함 전체 원본 사진"이라는 서로 다른
@@ -10281,7 +10297,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     expressLogoUpload: "로고 업로드", expressLogoConfirm: "로고 확인",
     finishedFileUpload: "완성파일 업로드", finishedFileCheck: "인쇄가능 확인", finishedFilePreview: "완성파일 미리보기",
     logoScanGuide: "촬영 안내", replicateScanGuide: "촬영 안내",
-    replicateUploadScan: "명함 촬영", replicateQualityCheck: "사진 품질 확인", replicateLogoArea: "로고 위치", replicateLogoChoice: "로고 준비 방법", replicateLogoAiCompare: "AI 로고 비교", ocrResultReview: "명함 글자 확인", ocrFieldReview: "정보 항목 확인", replicateConfirm: "주문 확인",
+    replicateUploadScan: "명함 촬영", replicateQualityCheck: "사진 품질 확인", replicateUploadScanBack: "뒷면 촬영", replicateQualityCheckBack: "뒷면 품질 확인", ocrResultReviewBack: "뒷면 글자 확인", replicateLogoArea: "로고 위치", replicateLogoChoice: "로고 준비 방법", replicateLogoAiCompare: "AI 로고 비교", ocrResultReview: "명함 글자 확인", ocrFieldReview: "정보 항목 확인", replicateConfirm: "주문 확인",
     logoSourceChoice: "로고 출처 선택",
     company: "회사명", personName: "성명", phone: "연락처",
     positionInput: "직함", addressInput: "주소", telInput: "회사 전화번호", faxInput: "팩스",
@@ -10797,7 +10813,10 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
     finishedFileUpload: "완성된 명함 인쇄 파일을 올려주세요. 파일을 읽어서 미리 보여 드릴게요.",
     finishedFileCheck: "인쇄 가능 여부를 확인하고 있어요.",
     finishedFilePreview: "업로드하신 파일을 확인해주세요.",
-    replicateUploadScan: "명함을 화면의 사각형 안에 맞춰 찍어 주세요. 찍어 둔 사진이나 스캔 파일이 있으면 올려 주셔도 돼요.",
+    replicateUploadScan: "명함을 찍어 주세요. 찍어 둔 사진이나 스캔 파일이 있으면 올려 주셔도 돼요.",
+    replicateUploadScanBack: "양면 인쇄를 고르셨으니 이제 명함 뒷면을 찍어 주세요. 찍어 둔 사진이나 스캔 파일도 괜찮아요.",
+    replicateQualityCheckBack: "뒷면 사진을 확인했어요. 명함 테두리가 맞는지 봐 주세요.",
+    ocrResultReviewBack: "뒷면 글자를 읽을게요. 사진과 한 줄씩 비교해서, 인쇄된 그대로인지 확인해 주세요.",
     replicateQualityCheck: "찍은 사진을 확인했어요. 명함 테두리가 맞는지 봐 주세요.",
     replicateLogoArea: "명함에서 로고가 있는 곳을 손가락으로 끌어 사각형으로 표시해 주세요. 로고가 없으면 '로고 없음'을 눌러 주세요.",
     replicateLogoChoice: "이 로고는 색이 여러 가지라 사진으로는 선명하게 인쇄하기 어렵습니다. 로고 원본 파일(AI·PDF·큰 그림 파일)이 있으시면 올려 주세요. 없으시면 사진에서 오려 쓸 수 있지만, 선명하지 않거나 원본과 다르게 인쇄될 수 있습니다.",
@@ -11068,7 +11087,9 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
           </>
         );
       }
+      case "replicateUploadScanBack":
       case "replicateUploadScan": {
+        const back = step.endsWith("Back");
         // 2026-11-20 — 가이드 사각형이 있는 촬영 화면 + 모서리 자동 검출 + 품질 검사(재촬영 안내 1개)
         const startScan = async (img, guide, file) => {
           setCardScanBusy(true);
@@ -11078,7 +11099,7 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
             setLogoFile(f);
             setCardPhotoFile(f); // 명함 전체 촬영본 — 배경("촬영사진 그대로") 등에서 이걸 씁니다
             setCardScan({ img, result, auto: result.found ? result.corners : null }); // auto = 자동으로 찾은 테두리(손으로 맞춘 것과 비교용)
-            commit("명함 사진을 찍었어요", "replicateQualityCheck");
+            commit(back ? "뒷면 사진을 찍었어요" : "명함 사진을 찍었어요", back ? "replicateQualityCheckBack" : "replicateQualityCheck");
           } catch {
             setLogoQualityWarning("사진을 불러오지 못했어요. 다시 찍어 주세요.");
           }
@@ -11097,8 +11118,10 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
           </>
         );
       }
+      case "replicateQualityCheckBack":
       case "replicateQualityCheck": {
-        if (!cardScan) { return <ChatChoiceRow options={[{ label: "다시 찍을게요", value: "retake" }]} onPick={() => setStep("replicateUploadScan")} />; }
+        const back = step.endsWith("Back");
+        if (!cardScan) { return <ChatChoiceRow options={[{ label: "다시 찍을게요", value: "retake" }]} onPick={() => setStep(back ? "replicateUploadScanBack" : "replicateUploadScan")} />; }
         return (
           <CardScanReview scan={cardScan}
             onAdjust={async (c, done) => {
@@ -11126,9 +11149,9 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
               try { setLogoFlatUrl(cardScanFlatDataUrl(cardScan.img, cardScan.result.corners, 24, cardScan.result.sizeMm)); } catch { setLogoFlatUrl(cardScan.result.flatUrl); }
               setLogoKind(null); setLogoCutUrls({ orig: null, clean: null, ai: null, aiMock: false }); setLogoCutConsent(false);
               // 2026-11-24 — 3·4번은 명함 전체를 그대로 쓰므로 로고를 따로 고르지 않고 바로 글자 확인
-              commit("이 사진 사용할게요", scanOrderMode ? "ocrResultReview" : "replicateLogoArea");
+              commit("이 사진 사용할게요", back ? "ocrResultReviewBack" : scanOrderMode ? "ocrResultReview" : "replicateLogoArea");
             }}
-            onRetake={() => { setCardScan(null); setLogoQualityWarning(""); setLog((l) => l.slice(0, -1)); setStep("replicateUploadScan"); }} />
+            onRetake={() => { setCardScan(null); setLogoQualityWarning(""); setLog((l) => l.slice(0, -1)); setStep(back ? "replicateUploadScanBack" : "replicateUploadScan"); }} />
         );
       }
       case "replicateLogoArea": {
@@ -11247,14 +11270,31 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
             onOther={() => { setLog((l) => l.slice(0, -1)); setStep("replicateLogoChoice"); }} />
         );
       }
+      case "ocrResultReviewBack":
       case "ocrResultReview":
         // 2026-11-22: 예시(getMockOcrResult) 대신 실제 판독 — 펴진 명함(1mm=24화소)을 서버로 보내고 줄마다 고객 확인
-        return <OcrLineConfirm flatUrl={logoFlatUrl || cardPhotoFlatUrl} state={ocrState} setState={setOcrState}
+        return <OcrLineConfirm key={step} flatUrl={logoFlatUrl || cardPhotoFlatUrl} state={ocrState} setState={setOcrState}
           onManual={() => { setOcrFields({ fields: {}, etcCandidates: [], rawText: "" }); commit("직접 입력할게요", "ocrFieldReview"); }}
           onDone={(lines, manual) => {
-            setOcrFields(ocrLinesToFields(lines, manual)); setOcrState((s) => ({ ...s, finalLines: lines, finalManual: manual }));
+            const after = scanOrderMode === "replicate" ? "replicateConfirm" : "ocrFieldReview";
+            if (step === "ocrResultReviewBack") {
+              // 뒷면 확인 끝: 지금 판독 상태(뒷면)는 finalLines에 두고, 앞면은 frontScan에 그대로
+              setOcrState((s) => ({ ...s, finalLines: lines, finalManual: manual }));
+              commit("뒷면 글자를 모두 확인했어요", after);
+              return;
+            }
+            setOcrFields(ocrLinesToFields(lines, manual));
+            if (scanOrderMode && scanBothSides) {
+              // 양면 고객: 앞면 결과를 보관하고 뒷면 찍기로
+              setFrontScan({ flatUrl: logoFlatUrl || cardPhotoFlatUrl, lines, manual, sizeMm: cardScan?.result?.sizeMm || null });
+              setCardScan(null); setLogoFlatUrl(null); setCardPhotoFlatUrl(null); setLogoQualityWarning("");
+              setOcrState({ status: "idle", lines: [], error: "" });
+              commit("앞면 글자를 모두 확인했어요", "replicateUploadScanBack");
+              return;
+            }
+            setOcrState((s) => ({ ...s, finalLines: lines, finalManual: manual }));
             // 4번(똑같이): 확인 끝 → 바로 주문 확인. 3번(정보만 바꾸기): 바꿀 정보 고치기 → 주문 확인
-            commit("글자를 모두 확인했어요", scanOrderMode === "replicate" ? "replicateConfirm" : "ocrFieldReview");
+            commit("글자를 모두 확인했어요", after);
           }} />;
       case "replicateConfirm": {
         // 2026-11-24 — 3·4번 마무리: 디자인 상담 없이 배송지·결제로. 명함을 다시 만드는 엔진이 서버에 붙기 전까지는
@@ -11262,29 +11302,45 @@ function AiConsultDesign({ order, patch, go, back, testSeed = null }) {
         const isEdit = scanOrderMode === "sampleEdit";
         const ed = ocrFields?.edited || {};
         const changed = isEdit ? [["회사", ed.companyName], ["이름", ed.personName], ["직책", ed.position], ["휴대폰", ed.mobile], ["전화", ed.telephone], ["팩스", ed.fax], ["이메일", ed.email], ["홈페이지", ed.website], ["주소", ed.address]].filter(([, v]) => v) : [];
+        // 양면: 앞면은 frontScan, 지금 화면의 사진·판독은 뒷면
+        const curFlat = logoFlatUrl || cardPhotoFlatUrl;
+        const frontFlat = frontScan ? frontScan.flatUrl : curFlat, backFlat = frontScan ? curFlat : null;
+        const keepLines = (ls) => (ls || []).filter((l) => l.status !== "removed").map((l) => ({ text: l.text, type: l.type, box: l.box || null, status: l.status }));
+        const frontLines = frontScan ? frontScan.lines : ocrState.finalLines, backLines = frontScan ? ocrState.finalLines : null;
         return (
           <>
-            {(logoFlatUrl || cardPhotoFlatUrl) && <img src={logoFlatUrl || cardPhotoFlatUrl} alt="찍은 명함" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 8, display: "block" }} />}
+            {[["앞면", frontFlat], ["뒷면", backFlat]].filter(([, u]) => u).map(([t, u]) => (
+              <div key={t} style={{ marginBottom: 8 }}>
+                {backFlat && <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-soft)", marginBottom: 3 }}>{t}</div>}
+                <img src={u} alt={`찍은 명함 ${t}`} style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)", display: "block" }} />
+              </div>
+            ))}
             <ChatConfirmCard
               title={isEdit ? "이 디자인에 바꾼 정보로 만들까요?" : "이 명함과 똑같이 만들까요?"}
               rows={[
                 { k: "주문 방식", v: isEdit ? "디자인 그대로, 정보만 바꾸기" : "가지고 있는 명함과 똑같이" },
+                { k: "인쇄", v: backFlat ? "양면 (앞면·뒷면)" : "단면" },
                 ...changed.map(([k, v]) => ({ k, v })),
                 { k: "안내", v: "글자는 확인하신 그대로 넣어요. 시안을 만들어 확인을 받은 뒤 인쇄해요" + (isEdit ? ". 특별한 글씨체는 가장 비슷한 글씨체로 보여 드려요" : "") },
               ]}
               applyLabel="네, 이대로 진행"
               retryLabel="다시 찍기"
               onApply={async () => {
-                const flat = logoFlatUrl || cardPhotoFlatUrl;
+                // 관리자 메일 첨부는 1개라, 양면이면 앞면 위·뒷면 아래로 한 장에 붙여 보냄
+                let attach = frontFlat;
+                if (backFlat) { try { attach = await stackCardImages(frontFlat, backFlat); } catch { /* 실패하면 앞면만 */ } }
+                const name = (isEdit ? "샘플명함_정보변경" : "샘플명함_그대로") + (backFlat ? "_양면" : "") + ".jpg";
                 patch({
-                  specialOrderFile: flat ? { dataUrl: flat, name: isEdit ? "샘플명함_정보변경.jpg" : "샘플명함_그대로.jpg" } : null,
-                  designRecipe: { kind: isEdit ? "sampleEdit" : "replicate", sizeMm: cardScan?.result?.sizeMm || null,
-                    lines: (ocrState.finalLines || []).filter((l) => l.status !== "removed").map((l) => ({ text: l.text, type: l.type, box: l.box || null, status: l.status })),
-                    manualLines: ocrState.finalManual || [], edited: isEdit ? ed : null },
+                  specialOrderFile: attach ? { dataUrl: attach, name } : null,
+                  designRecipe: { kind: isEdit ? "sampleEdit" : "replicate", sides: backFlat ? 2 : 1,
+                    sizeMm: (frontScan ? frontScan.sizeMm : cardScan?.result?.sizeMm) || null,
+                    lines: keepLines(frontLines), manualLines: (frontScan ? frontScan.manual : ocrState.finalManual) || [],
+                    backLines: backFlat ? keepLines(backLines) : null, backManualLines: backFlat ? (ocrState.finalManual || []) : null,
+                    edited: isEdit ? ed : null },
                 });
                 go("shipping");
               }}
-              onRetry={() => { setCardScan(null); setLog((l) => l.slice(0, -1)); setStep("replicateUploadScan"); }}
+              onRetry={() => { setCardScan(null); setFrontScan(null); setLogoQualityWarning(""); setOcrState({ status: "idle", lines: [], error: "" }); setLog((l) => l.slice(0, -1)); setStep("replicateUploadScan"); }}
             />
           </>
         );
