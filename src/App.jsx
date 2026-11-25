@@ -9215,10 +9215,13 @@ function OcrLineConfirm({ flatUrl, state, setState, onDone, onManual }) {
   const sawPending = useRef(false);
   if (state.status === "ready" && nPending > 0) sawPending.current = true;
   useEffect(() => {
-    if (state.status !== "ready" || !sawPending.current || nPending > 0 || !allLines.length || typingManual) return;
+    if (state.status !== "ready" || typingManual) return;
+    // 2026-11-25 — 글자가 전혀 없는 면(로고·그림만 있는 뒷면 등): 안내를 보여 주고 잠시 뒤 그대로 다음 단계로
+    if (!allLines.length) { const t = setTimeout(() => onDone([], []), 2500); return () => clearTimeout(t); }
+    if (!sawPending.current || nPending > 0) return;
     const t = setTimeout(() => onDone(allLines, []), 500);
     return () => clearTimeout(t);
-  }, [state.status, nPending, typingManual]);
+  }, [state.status, nPending, typingManual, allLines.length]);
   useEffect(() => {
     if (!flatUrl || state.status !== "idle") return;
     const token = {}; reqRef.current = token;
@@ -9263,7 +9266,13 @@ function OcrLineConfirm({ flatUrl, state, setState, onDone, onManual }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <OcrCardViewer flatUrl={flatUrl} />
-      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 2 }}>명함에 인쇄된 글자가 맞나요?</div>
+      {!lines.length && (
+        <div style={{ background: "var(--paper-deep)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, fontSize: 12.5, color: "var(--ink)", lineHeight: 1.6 }}>
+          <b>글자가 없는 면이에요.</b> 그림·로고를 그대로 만들어요. 곧 다음 단계로 넘어가요.
+          <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>글자가 있는데 못 읽었다면 아래 '빠진 줄 직접 추가'로 적어 주세요.</div>
+        </div>
+      )}
+      {lines.length > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 2 }}>명함에 인쇄된 글자가 맞나요?</div>}
       <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 8 }}>
         위 명함과 한 줄씩 비교해 주세요. 확인한 글자는 그대로 인쇄되고, 이후 AI가 바꾸지 않아요. ({done}/{lines.length}줄 확인)
       </div>
